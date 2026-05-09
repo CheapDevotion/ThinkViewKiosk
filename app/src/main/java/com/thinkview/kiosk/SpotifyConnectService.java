@@ -13,12 +13,15 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 import com.spotify.connectstate.Connect;
 
 import xyz.gianlu.librespot.ZeroconfServer;
+import xyz.gianlu.librespot.audio.MetadataWrapper;
 import xyz.gianlu.librespot.audio.decoders.AudioQuality;
 import xyz.gianlu.librespot.core.Session;
 import xyz.gianlu.librespot.player.Player;
@@ -59,9 +62,33 @@ public class SpotifyConnectService extends Service {
     private Player player;
     private volatile boolean started = false;
 
+    // Now-playing footer support: state cached here, observed by MainActivity.
+    // The static instance pointer mirrors AlarmListenerService's pattern.
+    private static volatile SpotifyConnectService instance;
+    private volatile boolean hasActiveTrack = false;
+    private volatile boolean isPaused       = false;
+    private volatile String currentTitle    = null;
+    private volatile String currentArtist   = null;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    /// MainActivity registers/unregisters here in onResume/onPause to receive UI updates.
+    /// Single-observer (the kiosk only ever has one Activity); a list is overkill.
+    public interface PlaybackObserver {
+        void onSpotifyStateChanged();
+    }
+    private static volatile PlaybackObserver observer;
+    public static void setObserver(PlaybackObserver o) { observer = o; }
+    public static SpotifyConnectService getInstance() { return instance; }
+
+    public boolean hasActiveTrack() { return hasActiveTrack; }
+    public boolean isPaused()       { return isPaused; }
+    public String  currentTitle()   { return currentTitle; }
+    public String  currentArtist()  { return currentArtist; }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         startForeground(NOTIFICATION_ID, buildNotification("Waiting for Wi-Fi…"));
 
         // Multicast lock held for the service lifetime -- librespot's Zeroconf needs to send
@@ -152,10 +179,83 @@ public class SpotifyConnectService extends Service {
         player = null;
         session = null;
         zeroconf = null;
+        // Clear UI-visible state too so the footer hides during a rebuild.
+        hasActiveTrack = false;
+        currentTitle = null;
+        currentArtist = null;
+        notifyObserver();
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Now-playing footer support
+    // -------------------------------------------------------------------------------------
+
+    /// Called from SpotifyPlayerEventsListener on track change / metadata-available events.
+    void onSpotifyMetadata(MetadataWrapper md) {
+        try {
+            currentTitle  = md.getName();
+            currentArtist = md.getArtist();
+        } catch (Exception ex) {
+            Log.w(TAG, "metadata read failed: " + ex.getMessage());
+            return;
+        }
+        hasActiveTrack = true;
+        notifyObserver();
+    }
+
+    void onSpotifyPlaybackPaused(boolean paused) {
+        isPaused = paused;
+        notifyObserver();
+    }
+
+    void onSpotifyPlaybackEnded() {
+        hasActiveTrack = false;
+        currentTitle = null;
+        currentArtist = null;
+        notifyObserver();
+    }
+
+    void onSpotifyVolume(float volume) {
+        // Volume is reflected in the system slider, not the footer. The footer only has +/-
+        // buttons. Nothing to redraw on volume changes.
+    }
+
+    private void notifyObserver() {
+        PlaybackObserver o = observer;
+        if (o == null) return;
+        // Always hop to the main thread -- librespot's event callbacks come from internal
+        // worker threads.
+        mainHandler.post(new SpotifyObserverDispatch(o));
+    }
+
+    public void controlPlayPause() {
+        Player p = this.player;
+        if (p != null) p.playPause();
+    }
+
+    public void controlNext() {
+        Player p = this.player;
+        if (p != null) p.next();
+    }
+
+    public void controlPrevious() {
+        Player p = this.player;
+        if (p != null) p.previous();
+    }
+
+    public void controlVolumeUp() {
+        Player p = this.player;
+        if (p != null) p.volumeUp();
+    }
+
+    public void controlVolumeDown() {
+        Player p = this.player;
+        if (p != null) p.volumeDown();
     }
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         try { if (player != null) player.close(); } catch (Exception ignore) {}
         try { if (session != null) session.close(); } catch (Exception ignore) {}
         try { if (zeroconf != null) zeroconf.close(); } catch (Exception ignore) {}
@@ -222,6 +322,11 @@ public class SpotifyConnectService extends Service {
                     .setEnableNormalisation(true)
                     .build();
             this.player = new Player(playerConf, newSession);
+            // Subscribe to player events so the now-playing footer in MainActivity reflects
+            // current state without polling. SpotifyPlayerEventsListener is a top-level class
+            // (d8 has bitten us with anonymous inner classes; we don't take chances on a
+            // 14-method interface).
+            this.player.addEventsListener(new SpotifyPlayerEventsListener(this));
             updateNotification("Playing — " + getDisplayName());
         } catch (Exception ex) {
             Log.w(TAG, "couldn't start player: " + ex.getMessage(), ex);

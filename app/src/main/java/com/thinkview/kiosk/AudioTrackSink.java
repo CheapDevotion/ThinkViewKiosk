@@ -46,14 +46,34 @@ public class AudioTrackSink implements SinkOutput {
                     + sampleRate + "Hz/" + format.getChannels() + "ch/"
                     + format.getSampleSizeInBits() + "bit", null);
         }
-        // Triple the minimum -- WiFi jitter on the kiosk can otherwise underrun and click.
-        int bufferSize = minBuf * 3;
+        // Buffer sizing: the CD-18781Y's audio HAL has both a "fast" (low-latency) primary
+        // output and a "deep buffer" output. AudioPolicyManager picks based on AudioAttributes
+        // + buffer size + performance mode. Naively building an AudioTrack with USAGE_MEDIA
+        // and a small buffer (3x min) routed our PCM stream to the FAST output, whose
+        // AudioStreamOut on this device feeds an internal PipeSink that never reaches the
+        // physical speaker. Diagnostic: dumpsys media.audio_flinger showed 890k frames
+        // written into AudioOut_D (PRIMARY|FAST) while AudioOut_1D (deep buffer, the actual
+        // music path) had 8.7M frames written historically.
+        //
+        // Two changes to land on the deep-buffer thread:
+        //   1. setPerformanceMode(PERFORMANCE_MODE_NONE) -- explicitly opt OUT of fast.
+        //      MODE_NONE means "I don't care about latency, give me normal media routing."
+        //      The AudioPolicyManager honors this by skipping the fast track allocator.
+        //   2. Buffer >= ~400ms. Below that threshold the policy still considers
+        //      AUDIO_OUTPUT_FLAG_DEEP_BUFFER eligible only if the buffer is "big enough" --
+        //      empirically ~400ms on this generation of Qualcomm audio HALs.
+        // Triple the minimum to cover Wi-Fi jitter, then floor to ~500ms of audio.
+        int bytesPerSecond = sampleRate * format.getChannels()
+                * (format.getSampleSizeInBits() / 8);
+        int minHalfSecond = bytesPerSecond / 2;
+        int bufferSize = Math.max(minBuf * 3, minHalfSecond);
 
         try {
             track = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .setLegacyStreamType(android.media.AudioManager.STREAM_MUSIC)
                             .build())
                     .setAudioFormat(new AudioFormat.Builder()
                             .setSampleRate(sampleRate)
@@ -62,6 +82,7 @@ public class AudioTrackSink implements SinkOutput {
                             .build())
                     .setBufferSizeInBytes(bufferSize)
                     .setTransferMode(AudioTrack.MODE_STREAM)
+                    .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_NONE)
                     .build();
             track.setVolume(currentVolume);
             track.play();
@@ -87,6 +108,7 @@ public class AudioTrackSink implements SinkOutput {
     public boolean setVolume(float volume) {
         currentVolume = Math.max(0f, Math.min(1f, volume));
         if (track != null) track.setVolume(currentVolume);
+        Log.i(TAG, "setVolume(" + volume + ") -> " + currentVolume);
         return true;
     }
 

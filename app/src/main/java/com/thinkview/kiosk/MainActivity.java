@@ -21,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -39,7 +40,7 @@ import org.mozilla.geckoview.WebRequestError;
  * GeckoView ships as a standalone embeddable engine -- we bundle it directly so we're not at
  * the mercy of the device's stock WebView.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements SpotifyConnectService.PlaybackObserver {
 
     private static final String TAG = "ThinkViewKiosk";
     private static final String PREFS = "kiosk-prefs";
@@ -57,6 +58,7 @@ public class MainActivity extends Activity {
     private GeckoView geckoView;
     private GeckoSession session;
     private TextView statusOverlay;
+    private SpotifyFooterView spotifyFooter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -146,8 +148,50 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // Spotify now-playing footer pinned to the bottom. Hidden until a track starts
+        // playing; shown by onSpotifyStateChanged when SpotifyConnectService has metadata.
+        spotifyFooter = new SpotifyFooterView(this);
+        spotifyFooter.setVisibility(View.GONE);
+        FrameLayout.LayoutParams footerLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        root.addView(spotifyFooter, footerLp);
+
         setContentView(root);
         loadWhenOnline(url);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        SpotifyConnectService.setObserver(this);
+        // Service might already have a track playing when the activity comes back -- pull
+        // current state once on resume so the footer reflects reality without waiting for
+        // the next event.
+        onSpotifyStateChanged();
+    }
+
+    @Override
+    protected void onPause() {
+        SpotifyConnectService.setObserver(null);
+        super.onPause();
+    }
+
+    /// Called from SpotifyObserverDispatch on the main thread when the service's playback
+    /// state changes. Reads the current snapshot off the service and pushes it into the
+    /// footer view.
+    @Override
+    public void onSpotifyStateChanged() {
+        if (spotifyFooter == null) return;
+        SpotifyConnectService svc = SpotifyConnectService.getInstance();
+        if (svc == null || !svc.hasActiveTrack()) {
+            spotifyFooter.setVisibility(View.GONE);
+            return;
+        }
+        spotifyFooter.setTrackText(svc.currentTitle(), svc.currentArtist());
+        spotifyFooter.setPaused(svc.isPaused());
+        spotifyFooter.setVisibility(View.VISIBLE);
     }
 
     /// Cold boots from BootReceiver race system Wi-Fi association: the kiosk app is up before
