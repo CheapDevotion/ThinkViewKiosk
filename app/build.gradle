@@ -10,8 +10,8 @@ android {
         applicationId "com.thinkview.kiosk"
         minSdk 26
         targetSdk 27
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
 
         // 32-bit ARM only -- this is what the CD-18781Y is. Drops the size of GeckoView's native
         // libs to ~25MB instead of ~120MB for all ABIs.

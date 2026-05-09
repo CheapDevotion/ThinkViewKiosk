@@ -3,6 +3,7 @@ package com.thinkview.kiosk;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -35,8 +36,9 @@ public class MainActivity extends Activity {
     private static final String TAG = "ThinkViewKiosk";
     private static final String PREFS = "kiosk-prefs";
     private static final String KEY_URL = "dashboard-url";
-    private static final String KEY_REPO_OWNER = "repo-owner";
-    private static final String KEY_REPO_NAME  = "repo-name";
+    private static final String KEY_REPO_OWNER  = "repo-owner";
+    private static final String KEY_REPO_NAME   = "repo-name";
+    private static final String KEY_ORIENTATION = "orientation";
 
     private static GeckoRuntime sRuntime;
 
@@ -63,6 +65,10 @@ public class MainActivity extends Activity {
         applyImmersive();
 
         absorbRepoExtras(getIntent());
+        // Apply persisted orientation BEFORE super.onCreate completes its layout pass would be
+        // ideal, but we have to settle for setRequestedOrientation here -- there'll be a brief
+        // flicker on first cold start after orientation changes. Subsequent boots are clean.
+        applyOrientation();
         // (Re)schedule the recurring update alarm. Idempotent (same PendingIntent replaces the
         // existing one), so safe to call on every cold start. Belt + braces vs. relying solely
         // on BootReceiver, which doesn't fire on adb-install dev iterations.
@@ -145,14 +151,32 @@ public class MainActivity extends Activity {
 
     private void absorbRepoExtras(Intent intent) {
         if (intent == null) return;
-        String owner = intent.getStringExtra("repo_owner");
-        String repo  = intent.getStringExtra("repo_name");
-        if ((owner != null && !owner.isEmpty()) || (repo != null && !repo.isEmpty())) {
+        String owner       = intent.getStringExtra("repo_owner");
+        String repo        = intent.getStringExtra("repo_name");
+        String orientation = intent.getStringExtra("orientation");
+        if ((owner != null && !owner.isEmpty())
+                || (repo != null && !repo.isEmpty())
+                || (orientation != null && !orientation.isEmpty())) {
             SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-            if (owner != null && !owner.isEmpty()) ed.putString(KEY_REPO_OWNER, owner);
-            if (repo != null && !repo.isEmpty())   ed.putString(KEY_REPO_NAME,  repo);
+            if (owner != null && !owner.isEmpty())             ed.putString(KEY_REPO_OWNER,  owner);
+            if (repo != null && !repo.isEmpty())               ed.putString(KEY_REPO_NAME,   repo);
+            if (orientation != null && !orientation.isEmpty()) ed.putString(KEY_ORIENTATION, orientation);
             ed.apply();
         }
+    }
+
+    private void applyOrientation() {
+        String pref = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ORIENTATION, "landscape");
+        int requested;
+        switch (pref) {
+            case "portrait":         requested = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; break;
+            case "reversePortrait":  requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT; break;
+            case "reverseLandscape": requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE; break;
+            case "landscape":
+            default:                 requested = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; break;
+        }
+        Log.i(TAG, "orientation = " + pref);
+        setRequestedOrientation(requested);
     }
 
     private void triggerUpdateCheck() {
