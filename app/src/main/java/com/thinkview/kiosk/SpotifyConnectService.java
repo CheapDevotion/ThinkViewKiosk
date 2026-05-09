@@ -116,7 +116,42 @@ public class SpotifyConnectService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && intent.getBooleanExtra("rebuild", false)) {
+            Log.i(TAG, "rebuild requested -- closing existing Zeroconf and restarting");
+            rebuildZeroconfAsync();
+        }
         return START_STICKY;
+    }
+
+    /// In-place rebuild of the Zeroconf advertisement, used when the display name changes.
+    /// Compared to stopService + startForegroundService, this:
+    ///   - keeps the multicast lock held continuously (no Android-side mDNS gap)
+    ///   - keeps the foreground service notification up (no UI flicker)
+    ///   - eliminates the service lifecycle race where startForegroundService coalesces with
+    ///     a pending stop and onStartCommand is delivered to the *old* instance, leaving
+    ///     ZeroconfServer with the previous device name
+    ///
+    /// Off the main thread because Player/Session close calls can block on network I/O.
+    private void rebuildZeroconfAsync() {
+        Thread t = new Thread(new SpotifyRebuildTask(this), "spotify-rebuild");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /// Closes any live librespot objects so they can be re-created. Called from
+    /// SpotifyRebuildTask under the service monitor; package-private so the top-level task
+    /// can call into it without us exposing the field set.
+    /// Don't reset `started` here -- we never tore down the service, just the librespot
+    /// state. `started` tracks service-lifecycle state for the cold-boot path
+    /// (NetworkCallback fires once) and must stay true so a late onNetworkAvailable doesn't
+    /// double-start during a rebuild.
+    void tearDownLibrespotState() {
+        try { if (player != null) player.close(); } catch (Exception ignore) {}
+        try { if (session != null) session.close(); } catch (Exception ignore) {}
+        try { if (zeroconf != null) zeroconf.close(); } catch (Exception ignore) {}
+        player = null;
+        session = null;
+        zeroconf = null;
     }
 
     @Override
@@ -143,9 +178,14 @@ public class SpotifyConnectService extends Service {
 
     void startConnect() throws Exception {
         // Brief grace before enumerating interfaces; on Android 8.1 the network can flap as
-        // SoftAp / suplicant settle even after onAvailable() fires.
+        // SoftAp / suplicant settle even after onAvailable() fires. Only matters on cold boot --
+        // rebuilds skip this via doStartConnect() directly.
         try { Thread.sleep(2000); } catch (InterruptedException ignore) {}
+        doStartConnect();
+    }
 
+    /// Package-private so SpotifyRebuildTask can call it directly during a rename.
+    void doStartConnect() throws Exception {
         SharedPreferences prefs = getSharedPreferences("kiosk-prefs", MODE_PRIVATE);
         String displayName = prefs.getString("display-name", "ThinkView Kiosk");
         Log.i(TAG, "starting Spotify Connect target: " + displayName);

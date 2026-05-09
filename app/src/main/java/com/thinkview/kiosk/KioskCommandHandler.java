@@ -16,9 +16,15 @@ import android.util.Log;
  *   enable_siren      -> alarm-siren-enabled = true;  start AlarmListenerService (no-op if up)
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
- *   set_display_name  -> display-name = <value>; bounce SpotifyConnectService so Zeroconf
- *                        re-advertises with the new name; hot-update AlarmListenerService's
- *                        kiosk_command target filter without bouncing the websocket
+ *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
+ *                        Zeroconf advertisement in place under the new name (multicast lock
+ *                        held continuously, foreground service stays up); hot-update
+ *                        AlarmListenerService's kiosk_command target filter without bouncing
+ *                        the HA websocket
+ *   restart_spotify   -> trigger SpotifyConnectService to rebuild Zeroconf without changing
+ *                        the name. Forcing function for "phone Spotify lost track of me"
+ *   ping              -> log a line. Lets you confirm a device is alive and reachable on the
+ *                        HA event bus before issuing real commands.
  *   reload            -> tell MainActivity to reload current URL
  *   restart           -> kill MainActivity (Android relaunches via HOME) -- useful after pushed
  *                        config changes that need a clean boot
@@ -65,19 +71,43 @@ class KioskCommandHandler {
                 }
                 prefs.edit().putString("display-name", value).apply();
                 Log.i(TAG, "display-name = " + value);
-                // Bounce Spotify Connect so ZeroconfServer re-advertises under the new name.
-                // Zeroconf's device name is set at construction time -- there's no "rename"
-                // hook, so we tear down and rebuild.
-                app.stopService(new Intent(app, SpotifyConnectService.class));
+                // Rebuild Zeroconf in place via an intent extra delivered to the running
+                // SpotifyConnectService. Compared to stopService + startForegroundService:
+                //   - multicast lock stays held the whole time (no Android-side mDNS gap)
+                //   - foreground service notification stays up
+                //   - eliminates the lifecycle race where startForegroundService coalesces
+                //     with a pending stop and onStartCommand goes to the OLD instance
+                Intent rebuild = new Intent(app, SpotifyConnectService.class);
+                rebuild.putExtra("rebuild", true);
                 try {
-                    app.startForegroundService(new Intent(app, SpotifyConnectService.class));
+                    app.startForegroundService(rebuild);
                 } catch (Exception ex) {
-                    Log.w(TAG, "couldn't restart SpotifyConnectService: " + ex.getMessage());
+                    Log.w(TAG, "couldn't trigger Spotify rebuild: " + ex.getMessage());
                 }
                 // Hot-update the alarm listener's filter so the next kiosk_command targeting
                 // the new name reaches us. No websocket bounce -- saves an HA reconnect storm.
                 AlarmListenerService alarm = AlarmListenerService.getInstance();
                 if (alarm != null) alarm.updateDeviceName(value);
+                break;
+            case "restart_spotify":
+                // Forcing function for "the phone's Spotify lost track of me" or
+                // "the device went into a weird mDNS state". Re-fires the announcement under
+                // the existing display name without changing anything else.
+                Log.i(TAG, "restart_spotify -- rebuilding Zeroconf without rename");
+                Intent restartSpotify = new Intent(app, SpotifyConnectService.class);
+                restartSpotify.putExtra("rebuild", true);
+                try {
+                    app.startForegroundService(restartSpotify);
+                } catch (Exception ex) {
+                    Log.w(TAG, "couldn't trigger Spotify rebuild: " + ex.getMessage());
+                }
+                break;
+            case "ping":
+                // Liveness probe. If you fire `ping` and see this log line within a few
+                // seconds, the device's HA WebSocket is reachable and kiosk_command routing
+                // is working. Useful when half the fleet is silent and you need to know which
+                // ones are bricked vs which ones are just not in your Spotify cache.
+                Log.i(TAG, "ping received (value='" + value + "')");
                 break;
             case "reload":
                 Intent reload = new Intent(app, MainActivity.class);
