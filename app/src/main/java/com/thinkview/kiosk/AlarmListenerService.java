@@ -35,6 +35,7 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
         String haUrl       = prefs.getString("dashboard-url", null);
         String token       = prefs.getString("ha-token", null);
         String alarmEntity = prefs.getString("alarm-entity", null);
+        String deviceName  = prefs.getString("display-name", "ThinkView Kiosk");
 
         // Fall back to baked-in values from BuildConfig (compile-time constants populated from
         // gitignored secrets.properties). Lets adult-area devices Just Work without per-device
@@ -47,8 +48,8 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
             updateNotification("Misconfigured -- no HA URL or token");
             return;
         }
-        Log.i(TAG, "starting alarm listener for " + alarmEntity + " on " + haUrl);
-        client = new HaWebSocketClient(haUrl, token, alarmEntity, this);
+        Log.i(TAG, "starting alarm listener for " + alarmEntity + " on " + haUrl + " (device='" + deviceName + "')");
+        client = new HaWebSocketClient(haUrl, token, alarmEntity, deviceName, this);
         client.connect();
     }
 
@@ -81,6 +82,11 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
     @Override
     public void onConnectionState(boolean connected) {
         updateNotification(connected ? "Listening for alarm" : "Reconnecting to HA…");
+    }
+
+    @Override
+    public void onCommandReceived(String command, String value) {
+        KioskCommandHandler.handle(this, command, value);
     }
 
     private Notification buildNotification(String text) {

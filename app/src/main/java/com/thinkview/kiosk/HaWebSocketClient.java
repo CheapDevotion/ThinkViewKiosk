@@ -33,12 +33,15 @@ class HaWebSocketClient {
     interface Listener {
         void onAlarmTriggered(String triggerInfo);
         void onConnectionState(boolean connected);
+        /// Fired when an HA `kiosk_command` event arrives addressed to this device (or "all").
+        void onCommandReceived(String command, String value);
     }
 
     private final OkHttpClient http;
     private final String wsUrl;
     private final String accessToken;
     private final String alarmEntity;
+    private final String deviceName;
     private final Listener listener;
 
     private volatile WebSocket socket;
@@ -49,10 +52,11 @@ class HaWebSocketClient {
     // the firing once HA reports the alarm is no longer in 'triggered' state.
     private boolean alreadyFiredCurrentTrigger = false;
 
-    HaWebSocketClient(String haUrl, String accessToken, String alarmEntity, Listener listener) {
+    HaWebSocketClient(String haUrl, String accessToken, String alarmEntity, String deviceName, Listener listener) {
         this.wsUrl = toWebSocketUrl(haUrl);
         this.accessToken = accessToken;
         this.alarmEntity = alarmEntity;
+        this.deviceName = deviceName == null ? "" : deviceName;
         this.listener = listener;
         this.http = new OkHttpClient.Builder()
                 .pingInterval(30, TimeUnit.SECONDS)
@@ -106,6 +110,7 @@ class HaWebSocketClient {
                     listener.onConnectionState(true);
                     backoffMs = 1000; // reset backoff on successful auth
                     sendSubscribe();
+                    sendSubscribeCommands();
                     break;
                 case "auth_invalid":
                     Log.w(TAG, "HA auth_invalid -- check long-lived access token");
@@ -174,9 +179,29 @@ class HaWebSocketClient {
         Log.i(TAG, "subscribed to state changes for " + alarmEntity);
     }
 
+    /// Subscribe to HA's event bus for our custom `kiosk_command` event. Lets you remotely
+    /// disable a device's siren, change the dashboard URL, etc. via an HA automation that
+    /// fires an event with data like {"device": "Living Room", "command": "set_url", "value": "..."}.
+    /// Use device "all" to broadcast.
+    private void sendSubscribeCommands() {
+        JsonObject m = new JsonObject();
+        m.addProperty("id", subscriptionId++);
+        m.addProperty("type", "subscribe_events");
+        m.addProperty("event_type", "kiosk_command");
+        socket.send(m.toString());
+        Log.i(TAG, "subscribed to kiosk_command events as '" + deviceName + "'");
+    }
+
     private void handleEvent(JsonObject msg) {
         try {
             JsonObject event = msg.getAsJsonObject("event");
+            // subscribe_events delivers {event: {event_type, data, ...}}; subscribe_trigger
+            // delivers {event: {variables: {trigger: {...}}, ...}}. The presence of a top-level
+            // "event_type" tells us which.
+            if (event.has("event_type") && "kiosk_command".equals(event.get("event_type").getAsString())) {
+                handleCommandEvent(event);
+                return;
+            }
             JsonObject variables = event.getAsJsonObject("variables");
             JsonObject trigger = variables.getAsJsonObject("trigger");
             JsonObject toState = trigger.getAsJsonObject("to_state");
@@ -201,6 +226,27 @@ class HaWebSocketClient {
             }
         } catch (Exception ex) {
             Log.w(TAG, "event parse error: " + ex.getMessage());
+        }
+    }
+
+    private void handleCommandEvent(JsonObject event) {
+        try {
+            JsonObject data = event.getAsJsonObject("data");
+            if (data == null) return;
+            String target  = data.has("device")  ? data.get("device").getAsString()  : "";
+            String command = data.has("command") ? data.get("command").getAsString() : "";
+            String value   = data.has("value")   ? data.get("value").getAsString()   : "";
+            // Filter: only handle commands targeting us or the broadcast keyword "all".
+            boolean forUs = "all".equalsIgnoreCase(target) || deviceName.equalsIgnoreCase(target);
+            if (!forUs) {
+                Log.i(TAG, "ignoring kiosk_command for '" + target + "' (we are '" + deviceName + "')");
+                return;
+            }
+            if (command.isEmpty()) return;
+            Log.i(TAG, "kiosk_command: " + command + " value='" + value + "'");
+            listener.onCommandReceived(command, value);
+        } catch (Exception ex) {
+            Log.w(TAG, "command event parse error: " + ex.getMessage());
         }
     }
 

@@ -1,7 +1,11 @@
 package com.thinkview.kiosk;
 
 import android.app.Activity;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.net.ConnectivityManager;
@@ -77,6 +81,9 @@ public class MainActivity extends Activity {
         // ideal, but we have to settle for setRequestedOrientation here -- there'll be a brief
         // flicker on first cold start after orientation changes. Subsequent boots are clean.
         applyOrientation();
+        // Pin ourselves as the persistent home launcher so Android stops prompting "Choose a
+        // Home app" on every reboot. Requires device-owner; idempotent.
+        pinAsPersistentLauncher();
         // (Re)schedule the recurring update alarm. Idempotent (same PendingIntent replaces the
         // existing one), so safe to call on every cold start. Belt + braces vs. relying solely
         // on BootReceiver, which doesn't fire on adb-install dev iterations.
@@ -232,6 +239,32 @@ public class MainActivity extends Activity {
         if (alarmEntity != null && !alarmEntity.isEmpty()) { ed.putString(KEY_ALARM_ENTITY, alarmEntity); dirty = true; }
         if (hasSirenFlag)                                  { ed.putBoolean(KEY_ALARM_SIREN_ENABLED, sirenEnabled); dirty = true; }
         if (dirty) ed.apply();
+    }
+
+    /// Tells Android we are THE home launcher, period. With device-owner privileges (set during
+    /// provisioning) this overrides the system's "Choose a Home app" prompt that otherwise
+    /// fires every reboot when more than one app declares CATEGORY_HOME. Idempotent -- safe to
+    /// call on every onCreate.
+    private void pinAsPersistentLauncher() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        if (dpm == null) return;
+        if (!dpm.isDeviceOwnerApp(getPackageName())) {
+            Log.i(TAG, "not device-owner; can't pin launcher");
+            return;
+        }
+        try {
+            ComponentName admin = new ComponentName(this, AdminReceiver.class);
+            ComponentName home  = new ComponentName(this, MainActivity.class);
+            IntentFilter filter = new IntentFilter(Intent.ACTION_MAIN);
+            filter.addCategory(Intent.CATEGORY_HOME);
+            filter.addCategory(Intent.CATEGORY_DEFAULT);
+            // clear-then-add to keep the list from growing if Android stores duplicates.
+            dpm.clearPackagePersistentPreferredActivities(admin, getPackageName());
+            dpm.addPersistentPreferredActivity(admin, filter, home);
+            Log.i(TAG, "pinned as persistent home launcher");
+        } catch (Exception ex) {
+            Log.w(TAG, "couldn't pin launcher: " + ex.getMessage());
+        }
     }
 
     private void applyOrientation() {
