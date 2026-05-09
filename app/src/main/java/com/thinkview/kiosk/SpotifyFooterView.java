@@ -3,6 +3,8 @@ package com.thinkview.kiosk;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.TypedValue;
@@ -102,8 +104,13 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
     /// Builds a flat text-glyph button. We dodge ImageButton with system ic_media_* drawables
     /// because those have shadow/emboss baked into the bitmaps -- white-tinted, they read as
     /// glowy against the green background. Pure TextView with a Unicode glyph stays flat.
-    /// Touch feedback comes from the borderless selectableItemBackground ripple, which the
-    /// system theme provides for free on API 21+.
+    ///
+    /// Press feedback: we hand-build a StateListDrawable rather than using the theme's
+    /// selectableItemBackgroundBorderless. The kiosk activity uses Theme.NoTitleBar.Fullscreen
+    /// (pre-Material) and on this device's Lenovo skin that attribute resolves to an
+    /// orange-tinted Holo focus ring, which (a) clashes with the Spotify Green and
+    /// (b) sticks on whichever button was last tapped because Holo focus is sticky in touch
+    /// mode. Manual StateListDrawable + explicit focus disabling sidesteps both problems.
     private TextView makeButton(Context context, String glyph) {
         TextView b = new TextView(context);
         b.setText(glyph);
@@ -111,13 +118,22 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         b.setGravity(Gravity.CENTER);
         b.setIncludeFontPadding(false);
-        // Borderless ripple, theme-resolved.
-        android.util.TypedValue tv = new android.util.TypedValue();
-        context.getTheme().resolveAttribute(
-                android.R.attr.selectableItemBackgroundBorderless, tv, true);
-        if (tv.resourceId != 0) b.setBackgroundResource(tv.resourceId);
+
+        // 25% white overlay only while finger is down -- gives a subtle Material-style press
+        // confirmation that goes away the instant you lift, no orange Holo focus ring.
+        StateListDrawable bg = new StateListDrawable();
+        bg.addState(new int[]{android.R.attr.state_pressed},
+                new ColorDrawable(Color.parseColor("#40FFFFFF")));
+        bg.addState(new int[]{}, new ColorDrawable(Color.TRANSPARENT));
+        b.setBackground(bg);
+
         b.setClickable(true);
-        b.setFocusable(true);
+        // Explicitly NOT focusable. This is a touch-only kiosk, so D-pad focus is moot, and
+        // Holo's focused state (which is what was painting the persistent orange background
+        // on the pause button) doesn't apply if the button can't receive focus.
+        b.setFocusable(false);
+        b.setFocusableInTouchMode(false);
+
         b.setOnClickListener(this);
         int size = dp(48);
         LayoutParams lp = new LayoutParams(size, size);
