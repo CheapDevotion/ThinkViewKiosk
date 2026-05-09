@@ -93,7 +93,9 @@ public class MainActivity extends Activity {
         // KEY_ALARM_SIREN_ENABLED = false and never connect to HA's WebSocket -- no overlay,
         // no sound, nothing. They don't even know an alarm fired.
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        if (prefs.getBoolean(KEY_ALARM_SIREN_ENABLED, false)) {
+        // Default true: alarm siren on every device unless explicitly disabled. Kid-room
+        // devices flip this off via `adb shell am start --ez alarm_siren_enabled false ...`.
+        if (prefs.getBoolean(KEY_ALARM_SIREN_ENABLED, true)) {
             try {
                 startForegroundService(new Intent(this, AlarmListenerService.class));
             } catch (Exception ex) {

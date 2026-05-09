@@ -34,11 +34,17 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
         SharedPreferences prefs = getSharedPreferences("kiosk-prefs", MODE_PRIVATE);
         String haUrl       = prefs.getString("dashboard-url", null);
         String token       = prefs.getString("ha-token", null);
-        String alarmEntity = prefs.getString("alarm-entity", "alarm_control_panel.home_alarm");
+        String alarmEntity = prefs.getString("alarm-entity", null);
+
+        // Fall back to baked-in values from BuildConfig (compile-time constants populated from
+        // gitignored secrets.properties). Lets adult-area devices Just Work without per-device
+        // intent extras, while letting kid-room devices override via SharedPreferences.
+        if (token == null || token.isEmpty())             token = BuildConfig.HA_TOKEN;
+        if (alarmEntity == null || alarmEntity.isEmpty()) alarmEntity = BuildConfig.HA_ALARM_ENTITY;
 
         if (haUrl == null || haUrl.isEmpty() || token == null || token.isEmpty()) {
             Log.w(TAG, "missing HA URL or token; alarm listener cannot start");
-            updateNotification("Misconfigured -- no HA token");
+            updateNotification("Misconfigured -- no HA URL or token");
             return;
         }
         Log.i(TAG, "starting alarm listener for " + alarmEntity + " on " + haUrl);

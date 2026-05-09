@@ -2,6 +2,8 @@ package com.thinkview.kiosk;
 
 import android.util.Log;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -187,15 +189,7 @@ class HaWebSocketClient {
                     return;
                 }
                 alreadyFiredCurrentTrigger = true;
-                String info = entityId;
-                // Dig out a friendly attribute if HA provides one (custom HA configs often
-                // expose 'changed_by' or a custom 'trigger_source').
-                if (toState.has("attributes")) {
-                    JsonObject attrs = toState.getAsJsonObject("attributes");
-                    if (attrs.has("changed_by") && !attrs.get("changed_by").isJsonNull()) {
-                        info = entityId + " (by " + attrs.get("changed_by").getAsString() + ")";
-                    }
-                }
+                String info = describeTrigger(entityId, toState);
                 Log.w(TAG, "ALARM TRIGGERED: " + info);
                 listener.onAlarmTriggered(info);
             } else {
@@ -208,5 +202,34 @@ class HaWebSocketClient {
         } catch (Exception ex) {
             Log.w(TAG, "event parse error: " + ex.getMessage());
         }
+    }
+
+    /// Builds a human-readable description of what triggered the alarm. Prefers Alarmo's
+    /// last_triggered_sensors array (specific entity that tripped), then falls back to the
+    /// HA built-in panel's changed_by attribute, then the entity id itself.
+    private static String describeTrigger(String entityId, JsonObject toState) {
+        if (!toState.has("attributes")) return entityId;
+        JsonObject attrs = toState.getAsJsonObject("attributes");
+
+        // Alarmo: last_triggered_sensors is an array of entity_ids that caused the trigger.
+        if (attrs.has("last_triggered_sensors")) {
+            JsonElement el = attrs.get("last_triggered_sensors");
+            if (el.isJsonArray()) {
+                JsonArray sensors = el.getAsJsonArray();
+                if (sensors.size() > 0) {
+                    StringBuilder sb = new StringBuilder("Triggered by ");
+                    for (int i = 0; i < sensors.size(); i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append(sensors.get(i).getAsString());
+                    }
+                    return sb.toString();
+                }
+            }
+        }
+        // HA built-in alarm panel: changed_by carries the entity that disarmed/armed/triggered.
+        if (attrs.has("changed_by") && !attrs.get("changed_by").isJsonNull()) {
+            return "Triggered by " + attrs.get("changed_by").getAsString();
+        }
+        return entityId;
     }
 }

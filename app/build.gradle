@@ -2,6 +2,16 @@ plugins {
     id "com.android.application"
 }
 
+// Read local secrets (gitignored). Empty defaults if the file isn't present so a fresh clone
+// still builds; baked-in values just won't be available at runtime.
+def secretsFile = rootProject.file("secrets.properties")
+def secrets = new Properties()
+if (secretsFile.exists()) {
+    secrets.load(new FileInputStream(secretsFile))
+}
+def haToken       = secrets.getProperty("ha.token", "")
+def haAlarmEntity = secrets.getProperty("ha.alarm.entity", "alarm_control_panel.alarmo")
+
 android {
     namespace "com.thinkview.kiosk"
     compileSdk 34
@@ -10,8 +20,11 @@ android {
         applicationId "com.thinkview.kiosk"
         minSdk 26
         targetSdk 27
-        versionCode 7
-        versionName "1.6"
+        versionCode 8
+        versionName "1.7"
+
+        buildConfigField "String", "HA_TOKEN", "\"" + haToken + "\""
+        buildConfigField "String", "HA_ALARM_ENTITY", "\"" + haAlarmEntity + "\""
 
         // 32-bit ARM only -- this is what the CD-18781Y is. Drops the size of GeckoView's native
         // libs to ~25MB instead of ~120MB for all ABIs.
@@ -73,6 +86,10 @@ android {
 
     lint {
         abortOnError = false
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 }
 

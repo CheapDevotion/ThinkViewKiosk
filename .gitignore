@@ -14,3 +14,7 @@ Thumbs.db
 
 # Keystore (lives in parent project's Tools/)
 *.keystore
+
+# Local secrets baked into BuildConfig (HA token etc.) -- the published APK contains them but
+# the source tree on GitHub does not. Each build environment provides its own.
+secrets.properties
