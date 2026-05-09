@@ -80,6 +80,12 @@ public class MainActivity extends Activity {
         BootReceiver.scheduleUpdateAlarm(this);
         triggerUpdateCheck();
 
+        try {
+            startForegroundService(new Intent(this, SpotifyConnectService.class));
+        } catch (Exception ex) {
+            Log.w(TAG, "couldn't start Spotify Connect service: " + ex.getMessage());
+        }
+
         String url = resolveUrl(getIntent());
         Log.i(TAG, "onCreate; resolved url = " + url);
         if (url == null || url.isEmpty()) {

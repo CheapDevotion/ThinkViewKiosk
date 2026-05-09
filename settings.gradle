@@ -14,7 +14,12 @@ dependencyResolutionManagement {
         // the last version (95.x) that supports armeabi-v7a, which is what the CD-18781Y is.
         maven { url = uri("https://maven.mozilla.org/maven2/") }
         // librespot-java post-1.4.0 is published only via JitPack (built on-demand from
-        // GitHub tags at github.com/devgianlu/librespot-java).
+        // GitHub tags at github.com/devgianlu/librespot-java). JitPack ships a fat jar that
+        // shades all transitive deps and conflicts catastrophically with GeckoView. We instead
+        // build librespot-java locally with mvn (Scripts\build-librespot-deps.ps1) and consume
+        // its modular thin jars from mavenLocal -- mavenLocal must come BEFORE jitpack so the
+        // local artifacts win.
+        mavenLocal()
         maven { url = uri("https://jitpack.io") }
     }
 }
