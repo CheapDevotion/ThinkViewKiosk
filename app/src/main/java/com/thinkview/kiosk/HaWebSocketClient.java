@@ -33,6 +33,10 @@ class HaWebSocketClient {
 
     interface Listener {
         void onAlarmTriggered(String triggerInfo);
+        /// Fired when the alarm entity transitions back to a non-triggered state after we
+        /// previously fired a trigger. Lets the UI auto-dismiss the alarm overlay when the
+        /// alarm is disarmed elsewhere (Alarmo panel, HA UI, automation).
+        void onAlarmCleared();
         void onConnectionState(boolean connected);
         /// Fired when an HA `kiosk_command` event arrives addressed to this device (or "all").
         void onCommandReceived(String command, String value);
@@ -231,10 +235,12 @@ class HaWebSocketClient {
                 Log.w(TAG, "ALARM TRIGGERED: " + info);
                 listener.onAlarmTriggered(info);
             } else {
-                // Reset firing latch when alarm goes back to a non-triggered state.
+                // Reset firing latch when alarm goes back to a non-triggered state, and tell
+                // the listener so any open AlarmActivity overlay auto-dismisses.
                 if (alreadyFiredCurrentTrigger) {
                     Log.i(TAG, "alarm cleared (state=" + state + ")");
                     alreadyFiredCurrentTrigger = false;
+                    listener.onAlarmCleared();
                 }
             }
         } catch (Exception ex) {

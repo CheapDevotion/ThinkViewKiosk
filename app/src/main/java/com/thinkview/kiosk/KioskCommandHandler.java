@@ -17,6 +17,11 @@ import android.util.Log;
  *                        suppressed at trigger time.
  *   enable_siren      -> alarm-siren-enabled = true. Same service stays up; flag flipped
  *                        so the next trigger fires the overlay.
+ *   set_can_disarm    -> alarm-can-disarm = (value parsed as bool). Controls whether the
+ *                        AlarmActivity overlay shows the SILENCE button. When false, the
+ *                        overlay shows a "disarm from the Alarmo panel" hint instead;
+ *                        useful for kid rooms where you want the siren to keep wailing
+ *                        until disarmed at a designated location.
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -64,6 +69,16 @@ class KioskCommandHandler {
                 } catch (Exception ex) {
                     Log.w(TAG, "couldn't start AlarmListenerService: " + ex.getMessage());
                 }
+                break;
+            case "set_can_disarm":
+                // Accept "true"/"false"/"1"/"0"/"yes"/"no". Anything else falls through to
+                // false to err on the conservative side -- if you typo'd the value, better
+                // to lock the silence button than accidentally unlock it.
+                boolean canDisarm = "true".equalsIgnoreCase(value)
+                        || "1".equals(value)
+                        || "yes".equalsIgnoreCase(value);
+                prefs.edit().putBoolean("alarm-can-disarm", canDisarm).apply();
+                Log.i(TAG, "alarm-can-disarm = " + canDisarm);
                 break;
             case "set_url":
                 if (value == null || value.isEmpty()) {

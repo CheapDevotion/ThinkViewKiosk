@@ -104,6 +104,13 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
     }
 
     @Override
+    public void onAlarmCleared() {
+        // Auto-dismiss the overlay if it's up. Idempotent -- if no AlarmActivity is showing
+        // (e.g. siren is disabled on this device), this no-ops.
+        AlarmActivity.dismissIfShown();
+    }
+
+    @Override
     public void onConnectionState(boolean connected) {
         updateNotification(connected ? "Listening for alarm" : "Reconnecting to HA…");
     }
