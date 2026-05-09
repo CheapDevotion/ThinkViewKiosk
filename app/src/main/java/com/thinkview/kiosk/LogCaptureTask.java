@@ -9,13 +9,17 @@ import com.google.gson.JsonPrimitive;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * Captures the kiosk's recent logcat and posts it to Home Assistant as a persistent
@@ -59,19 +63,24 @@ class LogCaptureTask implements Runnable {
         upload(logs);
     }
 
-    /// Runs `logcat -d -t 800` in our own UID, returning the most recent 800 lines (or up to
-    /// 32 KB, whichever is smaller). 800 covers the typical span between an update commit and
-    /// a service crash with comfortable headroom for Spotify init / Wi-Fi flap noise.
+    /// Runs `logcat -d` in our own UID and filters to kiosk-relevant tags, capturing up to
+    /// MAX_LOG_BYTES of output. We don't use logcat's `-t N` line cap because the unfiltered
+    /// stream is dominated by GeckoView's MozAfterPaint chatter -- in the v18 self-test, all
+    /// 800 lines were Gecko debug noise and not a single kiosk line made it past the budget.
+    /// Better to walk the entire ring and pick out the lines we care about.
     private String captureLogcat() {
         Process proc = null;
         BufferedReader reader = null;
         try {
-            proc = Runtime.getRuntime().exec(new String[]{"logcat", "-d", "-t", "800"});
+            proc = Runtime.getRuntime().exec(new String[]{"logcat", "-d"});
             reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
             StringBuilder sb = new StringBuilder();
             String line;
             int budget = MAX_LOG_BYTES;
+            int kept = 0;
+            int dropped = 0;
             while ((line = reader.readLine()) != null) {
+                if (!isInteresting(line)) { dropped++; continue; }
                 int needed = line.length() + 1;
                 if (needed > budget) {
                     sb.append("[truncated -- exceeded ").append(MAX_LOG_BYTES).append(" bytes]\n");
@@ -79,7 +88,10 @@ class LogCaptureTask implements Runnable {
                 }
                 sb.append(line).append('\n');
                 budget -= needed;
+                kept++;
             }
+            sb.append("\n--- captured ").append(kept).append(" interesting lines, skipped ")
+              .append(dropped).append(" noisy ones (Gecko etc.) ---\n");
             return sb.toString();
         } catch (Exception ex) {
             return "logcat capture failed: " + ex.getMessage();
@@ -87,6 +99,31 @@ class LogCaptureTask implements Runnable {
             try { if (reader != null) reader.close(); } catch (Exception ignore) {}
             if (proc != null) proc.destroy();
         }
+    }
+
+    /// Filter test for logcat lines worth uploading. The kiosk subprocess is the only owner
+    /// of this UID's log stream, so we get our own app's output + GeckoView's child process
+    /// (which is verbose at debug level) + AndroidRuntime crash dumps (which always appear in
+    /// our process when we crash). The filter keeps:
+    ///   - Anything tagged "ThinkViewKiosk*" (our own logs across all sub-tags)
+    ///   - Anything containing "librespot" (Spotify Connect internals)
+    ///   - AndroidRuntime / FATAL / SIGSEGV / DEBUG (crash dumps)
+    ///   - PackageManager / PackageInstaller / ActivityManager when they reference our package
+    ///     (update + lifecycle visibility)
+    /// Everything else (mostly Gecko per-frame paint events) gets dropped.
+    private static boolean isInteresting(String line) {
+        if (line.contains("ThinkViewKiosk")) return true;
+        if (line.contains("librespot"))      return true;
+        if (line.contains("AndroidRuntime")) return true;
+        if (line.contains("FATAL EXCEPTION")) return true;
+        if (line.contains("DEBUG   :"))      return true; // SIGSEGV stack frames
+        if (line.contains("com.thinkview.kiosk")) {
+            // PackageManager / ActivityManager / PackageInstaller events about us are useful.
+            return line.contains("PackageManager")
+                || line.contains("PackageInstaller")
+                || line.contains("ActivityManager");
+        }
+        return false;
     }
 
     private void upload(String logs) {
@@ -114,33 +151,32 @@ class LogCaptureTask implements Runnable {
         body.addProperty("title", "Kiosk logs: " + deviceName);
         body.add("message", new JsonPrimitive(message));
 
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL(haBase + "/api/services/persistent_notification/create");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(15000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Authorization", "Bearer " + token);
-            conn.setRequestProperty("Content-Type", "application/json");
+        // OkHttp + MdnsDns: HA URLs are typically homeassistant.local, and Android 8.1 has no
+        // native mDNS. Plain HttpURLConnection bombs with "Unable to resolve host". Reusing
+        // the same Dns plumbing the alarm websocket uses keeps log uploads working without a
+        // separate resolution path.
+        OkHttpClient http = new OkHttpClient.Builder()
+                .dns(new MdnsDns(appContext))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .build();
 
-            byte[] bytes = body.toString().getBytes("UTF-8");
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(bytes);
-            }
+        Request req = new Request.Builder()
+                .url(haBase + "/api/services/persistent_notification/create")
+                .header("Authorization", "Bearer " + token)
+                .post(RequestBody.create(body.toString(),
+                        MediaType.parse("application/json; charset=utf-8")))
+                .build();
 
-            int code = conn.getResponseCode();
-            if (code >= 200 && code < 300) {
-                Log.i(TAG, "logs uploaded to persistent_notification.kiosk_logs_" + slug
-                        + " (" + bytes.length + " bytes)");
+        try (Response resp = http.newCall(req).execute()) {
+            if (resp.isSuccessful()) {
+                Log.i(TAG, "logs uploaded to persistent_notification.kiosk_logs_" + slug);
             } else {
-                Log.w(TAG, "logs upload HTTP " + code);
+                Log.w(TAG, "logs upload HTTP " + resp.code());
             }
         } catch (Exception ex) {
             Log.w(TAG, "logs upload failed: " + ex.getMessage());
-        } finally {
-            if (conn != null) conn.disconnect();
         }
     }
 
