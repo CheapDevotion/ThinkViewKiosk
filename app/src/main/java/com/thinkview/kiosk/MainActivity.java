@@ -54,6 +54,7 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
     private static final String KEY_ALARM_SIREN_ENABLED = "alarm-siren-enabled";
     private static final String KEY_ALARM_CAN_DISARM    = "alarm-can-disarm";
     private static final String KEY_ALARM_DISARM_CODE   = "alarm-disarm-code";
+    private static final String KEY_SCREEN_BRIGHTNESS   = "screen-brightness";
 
     private static GeckoRuntime sRuntime;
 
@@ -62,21 +63,26 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
     private TextView statusOverlay;
     private SpotifyFooterView spotifyFooter;
 
+    /// Static instance pointer so KioskCommandHandler.set_brightness can reach into the live
+    /// activity to update the window brightness without going through the launch path.
+    /// Mirrors the AlarmActivity / AlarmListenerService / SpotifyConnectService pattern.
+    private static volatile MainActivity instance;
+    public static MainActivity getInstance() { return instance; }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        instance = this;
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
 
-        // Force max window brightness regardless of system's adaptive-brightness setting.
-        // Without this the kiosk inherits whatever Android decided was "dim enough", which on
-        // wall-mounted devices is too low to read across the room.
-        WindowManager.LayoutParams lp = getWindow().getAttributes();
-        lp.screenBrightness = 1.0f;
-        getWindow().setAttributes(lp);
+        // Window brightness override. Defaults to 1.0 (full) for wall-mounted readability;
+        // can be dimmed via the set_brightness kiosk_command (e.g. "alarm armed -> dim
+        // bedroom panel to 20%"). Persists in SharedPreferences across reboots.
+        applyBrightness();
 
         applyImmersive();
 
@@ -259,8 +265,24 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
 
     @Override
     protected void onDestroy() {
+        if (instance == this) instance = null;
         if (session != null) session.close();
         super.onDestroy();
+    }
+
+    /// Reads screen-brightness pref and applies it to the window. Called from onCreate and
+    /// from the set_brightness kiosk_command path. Clamps to [0.05, 1.0] -- below 5% the
+    /// screen is functionally unreadable and we don't want a remote command to lock the
+    /// user out of touch interaction. Above 1.0 is undefined per Android docs.
+    public void applyBrightness() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        float brightness = prefs.getFloat(KEY_SCREEN_BRIGHTNESS, 1.0f);
+        if (brightness < 0.05f) brightness = 0.05f;
+        if (brightness > 1.0f)  brightness = 1.0f;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = brightness;
+        getWindow().setAttributes(lp);
+        Log.i(TAG, "screen brightness applied = " + brightness);
     }
 
     private void absorbRepoExtras(Intent intent) {
@@ -276,6 +298,8 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         boolean sirenEnabled = intent.getBooleanExtra("alarm_siren_enabled", false);
         boolean hasCanDisarmFlag = intent.hasExtra("alarm_can_disarm");
         boolean canDisarm = intent.getBooleanExtra("alarm_can_disarm", false);
+        boolean hasBrightness = intent.hasExtra("screen_brightness");
+        float brightness = intent.getFloatExtra("screen_brightness", 1.0f);
 
         SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
         boolean dirty = false;
@@ -288,6 +312,7 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         if (disarmCode != null)                            { ed.putString(KEY_ALARM_DISARM_CODE, disarmCode); dirty = true; }
         if (hasSirenFlag)                                  { ed.putBoolean(KEY_ALARM_SIREN_ENABLED, sirenEnabled); dirty = true; }
         if (hasCanDisarmFlag)                              { ed.putBoolean(KEY_ALARM_CAN_DISARM, canDisarm); dirty = true; }
+        if (hasBrightness)                                 { ed.putFloat(KEY_SCREEN_BRIGHTNESS, brightness); dirty = true; }
         if (dirty) ed.apply();
     }
 

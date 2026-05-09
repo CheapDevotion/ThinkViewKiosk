@@ -27,6 +27,11 @@ import android.util.Log;
  *   set_disarm_code   -> alarm-disarm-code = <value>. Optional PIN passed to HA's
  *                        alarm_disarm service. Empty means "no code" (works for Alarmo
  *                        configurations that don't require a code from trusted devices).
+ *   set_brightness    -> screen-brightness = <value>. Accepts 0.0-1.0 fraction or 0-100
+ *                        percent (anything > 1.5 is interpreted as a percentage). Applied
+ *                        live to the running MainActivity's window and persisted to
+ *                        SharedPreferences. Useful for "alarm armed -> dim bedroom panel"
+ *                        style HA automations.
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -91,6 +96,35 @@ class KioskCommandHandler {
                 String newCode = value == null ? "" : value;
                 prefs.edit().putString("alarm-disarm-code", newCode).apply();
                 Log.i(TAG, "alarm-disarm-code " + (newCode.isEmpty() ? "cleared" : "set"));
+                break;
+            case "set_brightness":
+                if (value == null || value.isEmpty()) {
+                    Log.w(TAG, "set_brightness with empty value; ignoring");
+                    return;
+                }
+                float brightness;
+                try {
+                    brightness = Float.parseFloat(value);
+                } catch (NumberFormatException nfe) {
+                    Log.w(TAG, "set_brightness with non-numeric value '" + value + "'; ignoring");
+                    return;
+                }
+                // Accept either fractional (0.0-1.0) or percentage (0-100) input. Anything
+                // above 1.5 is unambiguously a percentage; convert.
+                if (brightness > 1.5f) brightness = brightness / 100f;
+                // Clamp to [0.05, 1.0]. Below 5% the screen is functionally unreadable; we
+                // don't want a remote command (or a typo) to lock the user out of touch
+                // interaction.
+                if (brightness < 0.05f) brightness = 0.05f;
+                if (brightness > 1.0f)  brightness = 1.0f;
+                prefs.edit().putFloat("screen-brightness", brightness).apply();
+                Log.i(TAG, "screen-brightness = " + brightness);
+                // Apply to the live activity if it's running. If it isn't, the next launch
+                // will pick up the pref via MainActivity.applyBrightness in onCreate.
+                MainActivity main = MainActivity.getInstance();
+                if (main != null) {
+                    main.runOnUiThread(new BrightnessApplyTask(main));
+                }
                 break;
             case "set_url":
                 if (value == null || value.isEmpty()) {
