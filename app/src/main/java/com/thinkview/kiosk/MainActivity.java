@@ -98,18 +98,16 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
             Log.w(TAG, "couldn't start Spotify Connect service: " + ex.getMessage());
         }
 
-        // Alarm siren listener: only starts on devices that opted in. Kid-room devices keep
-        // KEY_ALARM_SIREN_ENABLED = false and never connect to HA's WebSocket -- no overlay,
-        // no sound, nothing. They don't even know an alarm fired.
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        // Default true: alarm siren on every device unless explicitly disabled. Kid-room
-        // devices flip this off via `adb shell am start --ez alarm_siren_enabled false ...`.
-        if (prefs.getBoolean(KEY_ALARM_SIREN_ENABLED, true)) {
-            try {
-                startForegroundService(new Intent(this, AlarmListenerService.class));
-            } catch (Exception ex) {
-                Log.w(TAG, "couldn't start alarm listener service: " + ex.getMessage());
-            }
+        // AlarmListenerService starts unconditionally now (v22+). It serves two purposes: HA
+        // websocket subscription for kiosk_command events (fleet diagnostics, remote control)
+        // AND alarm trigger detection. Earlier versions gated the start on
+        // KEY_ALARM_SIREN_ENABLED, which meant kid-room devices never connected the websocket
+        // and were unreachable via kiosk_command. Now the service always runs; the alarm
+        // overlay is gated inside onAlarmTriggered.
+        try {
+            startForegroundService(new Intent(this, AlarmListenerService.class));
+        } catch (Exception ex) {
+            Log.w(TAG, "couldn't start alarm listener service: " + ex.getMessage());
         }
 
         String url = resolveUrl(getIntent());

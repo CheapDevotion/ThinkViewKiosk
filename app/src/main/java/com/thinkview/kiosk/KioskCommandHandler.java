@@ -12,8 +12,11 @@ import android.util.Log;
  * `adb shell am start --es ... -n com.thinkview.kiosk/.MainActivity`.
  *
  * Supported commands:
- *   disable_siren     -> alarm-siren-enabled = false; stop AlarmListenerService
- *   enable_siren      -> alarm-siren-enabled = true;  start AlarmListenerService (no-op if up)
+ *   disable_siren     -> alarm-siren-enabled = false. The websocket service stays up
+ *                        (kiosk_command remains reachable); only the alarm overlay is
+ *                        suppressed at trigger time.
+ *   enable_siren      -> alarm-siren-enabled = true. Same service stays up; flag flipped
+ *                        so the next trigger fires the overlay.
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -42,13 +45,20 @@ class KioskCommandHandler {
 
         switch (command) {
             case "disable_siren":
+                // Don't stop the service -- it owns the kiosk_command websocket. Just flip
+                // the pref; AlarmListenerService.onAlarmTriggered checks it before firing
+                // the AlarmActivity overlay. Earlier versions stopped the service here,
+                // which orphaned the device from remote control (you couldn't even
+                // re-enable the siren without ADB or a re-provision).
                 prefs.edit().putBoolean("alarm-siren-enabled", false).apply();
-                Log.i(TAG, "alarm-siren-enabled = false");
-                app.stopService(new Intent(app, AlarmListenerService.class));
+                Log.i(TAG, "alarm-siren-enabled = false (websocket stays up; only the overlay is gated)");
                 break;
             case "enable_siren":
                 prefs.edit().putBoolean("alarm-siren-enabled", true).apply();
                 Log.i(TAG, "alarm-siren-enabled = true");
+                // Service is already running (started by MainActivity unconditionally on
+                // v22+). Belt-and-braces start in case we got here on a quirky launch path
+                // where MainActivity hasn't reached its onCreate yet.
                 try {
                     app.startForegroundService(new Intent(app, AlarmListenerService.class));
                 } catch (Exception ex) {

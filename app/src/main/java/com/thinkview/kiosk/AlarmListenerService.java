@@ -11,13 +11,16 @@ import android.os.IBinder;
 import android.util.Log;
 
 /**
- * Foreground service that holds an authenticated WebSocket connection to Home Assistant and
- * fires {@link AlarmActivity} the instant the configured alarm_control_panel transitions to
- * 'triggered' state. Reads HA URL, access token, and alarm entity from SharedPreferences (set
- * by the provisioning pipeline via intent extras).
+ * Foreground service that holds an authenticated WebSocket connection to Home Assistant.
+ * Fires {@link AlarmActivity} the instant the configured alarm_control_panel transitions to
+ * 'triggered' state -- but ONLY if alarm_siren_enabled is true at the moment of trigger.
  *
- * Only started when alarm_siren_enabled = true. Kid-room devices never start this service so
- * they never know the alarm fired -- no overlay, no sound.
+ * The service runs on every device regardless of alarm-siren-enabled, because this is also
+ * the bus that delivers kiosk_command events from HA. Earlier versions stopped the service
+ * when siren was disabled; that left the device deaf to all future remote commands (including
+ * the one to re-enable the siren) until the next reboot, which itself wouldn't help because
+ * MainActivity used to gate the start on the same pref. v22 decouples: websocket always
+ * connected, alarm overlay gated at trigger time.
  */
 public class AlarmListenerService extends Service implements HaWebSocketClient.Listener {
     private static final String TAG = "ThinkViewKiosk/Alarm";
@@ -82,6 +85,16 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
 
     @Override
     public void onAlarmTriggered(String triggerInfo) {
+        // Gate at trigger time: kid-room devices have alarm-siren-enabled=false and silently
+        // drop the event. We still log it so logcat tells you whether the trigger reached the
+        // device -- useful for confirming that "no siren on this device" was the pref talking,
+        // not the websocket dropping the event.
+        SharedPreferences prefs = getSharedPreferences("kiosk-prefs", MODE_PRIVATE);
+        boolean enabled = prefs.getBoolean("alarm-siren-enabled", true);
+        if (!enabled) {
+            Log.i(TAG, "alarm triggered but siren is disabled on this device; skipping overlay");
+            return;
+        }
         Intent intent = new Intent(this, AlarmActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP
