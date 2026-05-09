@@ -95,6 +95,48 @@ android {
     }
 }
 
+// Mirror the freshly-built release APK into the ThinkViewInit provisioner bundle whenever
+// :app:assembleRelease finishes. The provisioner reads APKs from disk lazily on each install
+// so even a running ThinkViewInit instance picks up the new file without restarting.
+//
+// Writes to:
+//   - ../ThinkViewInit/Resources/APKs/                       (source, checked into git)
+//   - ../ThinkViewInit/bin/Debug/net8.0-windows/Resources/APKs/    (if present)
+//   - ../ThinkViewInit/bin/Release/net8.0-windows/Resources/APKs/  (if present)
+//
+// Skipping silently when the provisioner repo isn't checked out alongside KioskApp keeps
+// fresh-clone CI builds working. We're a sibling project, not a hard dependency.
+afterEvaluate {
+    tasks.named("assembleRelease").configure {
+        doLast {
+            def apk = file("$buildDir/outputs/apk/release/app-release.apk")
+            if (!apk.exists()) {
+                logger.warn("release APK not found at $apk; skipping provisioner copy")
+                return
+            }
+            def candidates = [
+                rootProject.file("../ThinkViewInit/Resources/APKs"),
+                rootProject.file("../ThinkViewInit/bin/Debug/net8.0-windows/Resources/APKs"),
+                rootProject.file("../ThinkViewInit/bin/Release/net8.0-windows/Resources/APKs"),
+            ]
+            def copied = 0
+            for (dir in candidates) {
+                if (!dir.exists()) continue
+                copy {
+                    from apk
+                    into dir
+                    rename { "thinkview-kiosk.apk" }
+                }
+                logger.lifecycle("copied APK -> ${new File(dir, 'thinkview-kiosk.apk')}")
+                copied++
+            }
+            if (copied == 0) {
+                logger.info("no ThinkViewInit dirs found alongside KioskApp; skipped provisioner copy")
+            }
+        }
+    }
+}
+
 dependencies {
     // GeckoView 95.x is the last release that ships armeabi-v7a binaries (Mozilla dropped
     // 32-bit ARM in 96). Modern enough to run Home Assistant's frontend -- Firefox 95 from
