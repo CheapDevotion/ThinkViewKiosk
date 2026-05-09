@@ -18,10 +18,15 @@ import android.util.Log;
  *   enable_siren      -> alarm-siren-enabled = true. Same service stays up; flag flipped
  *                        so the next trigger fires the overlay.
  *   set_can_disarm    -> alarm-can-disarm = (value parsed as bool). Controls whether the
- *                        AlarmActivity overlay shows the SILENCE button. When false, the
- *                        overlay shows a "disarm from the Alarmo panel" hint instead;
- *                        useful for kid rooms where you want the siren to keep wailing
- *                        until disarmed at a designated location.
+ *                        AlarmActivity overlay shows the SILENCE button (which, on v24+,
+ *                        actually fires HA's alarm_disarm service rather than just stopping
+ *                        the local siren). When false, the overlay shows a "disarm from the
+ *                        Alarmo panel" hint instead. Useful for shared / kid rooms where
+ *                        you want the siren to keep wailing until disarmed at a designated
+ *                        location (e.g. master bedroom).
+ *   set_disarm_code   -> alarm-disarm-code = <value>. Optional PIN passed to HA's
+ *                        alarm_disarm service. Empty means "no code" (works for Alarmo
+ *                        configurations that don't require a code from trusted devices).
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -79,6 +84,13 @@ class KioskCommandHandler {
                         || "yes".equalsIgnoreCase(value);
                 prefs.edit().putBoolean("alarm-can-disarm", canDisarm).apply();
                 Log.i(TAG, "alarm-can-disarm = " + canDisarm);
+                break;
+            case "set_disarm_code":
+                // Empty string means "no code" -- explicitly clearing a previously-set code.
+                // Accept null too just in case the event has a missing value field.
+                String newCode = value == null ? "" : value;
+                prefs.edit().putString("alarm-disarm-code", newCode).apply();
+                Log.i(TAG, "alarm-disarm-code " + (newCode.isEmpty() ? "cleared" : "set"));
                 break;
             case "set_url":
                 if (value == null || value.isEmpty()) {

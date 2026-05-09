@@ -52,6 +52,8 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
     private static final String KEY_HA_TOKEN            = "ha-token";
     private static final String KEY_ALARM_ENTITY        = "alarm-entity";
     private static final String KEY_ALARM_SIREN_ENABLED = "alarm-siren-enabled";
+    private static final String KEY_ALARM_CAN_DISARM    = "alarm-can-disarm";
+    private static final String KEY_ALARM_DISARM_CODE   = "alarm-disarm-code";
 
     private static GeckoRuntime sRuntime;
 
@@ -269,8 +271,11 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         String displayName = intent.getStringExtra("display_name");
         String haToken     = intent.getStringExtra("ha_token");
         String alarmEntity = intent.getStringExtra("alarm_entity");
+        String disarmCode  = intent.getStringExtra("alarm_disarm_code");
         boolean hasSirenFlag = intent.hasExtra("alarm_siren_enabled");
         boolean sirenEnabled = intent.getBooleanExtra("alarm_siren_enabled", false);
+        boolean hasCanDisarmFlag = intent.hasExtra("alarm_can_disarm");
+        boolean canDisarm = intent.getBooleanExtra("alarm_can_disarm", false);
 
         SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
         boolean dirty = false;
@@ -280,7 +285,9 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         if (displayName != null && !displayName.isEmpty()) { ed.putString(KEY_DISPLAY_NAME, displayName); dirty = true; }
         if (haToken != null && !haToken.isEmpty())         { ed.putString(KEY_HA_TOKEN,     haToken);     dirty = true; }
         if (alarmEntity != null && !alarmEntity.isEmpty()) { ed.putString(KEY_ALARM_ENTITY, alarmEntity); dirty = true; }
+        if (disarmCode != null)                            { ed.putString(KEY_ALARM_DISARM_CODE, disarmCode); dirty = true; }
         if (hasSirenFlag)                                  { ed.putBoolean(KEY_ALARM_SIREN_ENABLED, sirenEnabled); dirty = true; }
+        if (hasCanDisarmFlag)                              { ed.putBoolean(KEY_ALARM_CAN_DISARM, canDisarm); dirty = true; }
         if (dirty) ed.apply();
     }
 
