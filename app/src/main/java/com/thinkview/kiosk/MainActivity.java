@@ -198,6 +198,7 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         spotifyFooter.setTrackText(svc.currentTitle(), svc.currentArtist());
         spotifyFooter.setArtworkUrl(svc.currentArtworkUrl());
         spotifyFooter.setPaused(svc.isPaused());
+        spotifyFooter.setVolume(svc.currentVolume());
         spotifyFooter.setVisibility(View.VISIBLE);
     }
 

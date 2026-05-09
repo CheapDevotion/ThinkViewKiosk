@@ -73,6 +73,7 @@ public class SpotifyConnectService extends Service {
     private volatile String currentTitle      = null;
     private volatile String currentArtist     = null;
     private volatile String currentArtworkUrl = null;
+    private volatile float currentVolume      = 1.0f;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     /// MainActivity registers/unregisters here in onResume/onPause to receive UI updates.
@@ -89,6 +90,7 @@ public class SpotifyConnectService extends Service {
     public String  currentTitle()      { return currentTitle; }
     public String  currentArtist()     { return currentArtist; }
     public String  currentArtworkUrl() { return currentArtworkUrl; }
+    public float   currentVolume()     { return currentVolume; }
 
     @Override
     public void onCreate() {
@@ -254,8 +256,8 @@ public class SpotifyConnectService extends Service {
     }
 
     void onSpotifyVolume(float volume) {
-        // Volume is reflected in the system slider, not the footer. The footer only has +/-
-        // buttons. Nothing to redraw on volume changes.
+        currentVolume = volume;
+        notifyObserver();
     }
 
     private void notifyObserver() {
@@ -358,6 +360,11 @@ public class SpotifyConnectService extends Service {
                     .setOutputClass(AudioTrackSink.class.getName())
                     .setPreferredQuality(AudioQuality.HIGH)
                     .setEnableNormalisation(true)
+                    // Default is 64 steps (~1.5% per tap) which is imperceptibly small for
+                    // a single tap on the kiosk's footer +/- buttons. 32 steps = ~3% per
+                    // tap, audibly meaningful while still being fine-grained enough that
+                    // hold-to-repeat feels smooth.
+                    .setVolumeSteps(32)
                     .build();
             this.player = new Player(playerConf, newSession);
             // Subscribe to player events so the now-playing footer in MainActivity reflects
