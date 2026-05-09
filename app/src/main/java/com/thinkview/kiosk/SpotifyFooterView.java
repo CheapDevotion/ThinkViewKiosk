@@ -9,7 +9,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -26,13 +25,28 @@ import java.util.Objects;
  * KioskApp's resource set as small as possible.
  */
 public class SpotifyFooterView extends LinearLayout implements View.OnClickListener {
+    /// Spotify's brand green. Used as the footer's solid background to match the host
+    /// service's identity. Material flatness: no gradient, no transparency.
+    private static final int SPOTIFY_GREEN = Color.parseColor("#1DB954");
+
+    // Unicode media glyphs render as flat monochrome shapes from Android's system font, so
+    // we don't need PNG/vector drawable assets for the controls. Compared to the system
+    // android.R.drawable.ic_media_* set, these have no built-in shadow/emboss -- which was
+    // the "glowy" effect that looked out of place against the green background.
+    private static final String GLYPH_PREV  = "⏮"; // ⏮ skip-back
+    private static final String GLYPH_PLAY  = "▶"; // ▶ play
+    private static final String GLYPH_PAUSE = "⏸"; // ⏸ pause
+    private static final String GLYPH_NEXT  = "⏭"; // ⏭ skip-forward
+    private static final String GLYPH_VOL_DOWN = "−"; // − minus
+    private static final String GLYPH_VOL_UP   = "+";
+
     private final ImageView artworkImage;
     private final TextView trackText;
-    private final ImageButton btnPrev;
-    private final ImageButton btnPlayPause;
-    private final ImageButton btnNext;
-    private final ImageButton btnVolDown;
-    private final ImageButton btnVolUp;
+    private final TextView btnPrev;
+    private final TextView btnPlayPause;
+    private final TextView btnNext;
+    private final TextView btnVolDown;
+    private final TextView btnVolUp;
 
     /// URL the artwork ImageView is currently displaying (or fetching). Used by
     /// SpotifyArtworkApply to decide whether a just-completed fetch should still be applied
@@ -44,17 +58,17 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         super(context);
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
-        // 88% black so the dashboard underneath is faintly visible -- doubles as a hint that
-        // the footer is overlaid rather than part of the page.
-        setBackgroundColor(Color.parseColor("#E0000000"));
+        // Solid Spotify Green -- branded, no transparency, Material flatness.
+        setBackgroundColor(SPOTIFY_GREEN);
         int padH = dp(16);
         int padV = dp(8);
         setPadding(padH, padV, padH, padV);
 
-        // Album art on the left. Dark gray placeholder before any image is fetched so the
-        // footer doesn't reflow when artwork lands later.
+        // Album art on the left. Slightly darker green placeholder so it disappears against
+        // the footer until artwork lands; keeps the layout stable without drawing attention
+        // to the empty slot.
         artworkImage = new ImageView(context);
-        artworkImage.setBackgroundColor(Color.parseColor("#222222"));
+        artworkImage.setBackgroundColor(Color.parseColor("#159443"));
         artworkImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
         int artSize = dp(48);
         LayoutParams artLp = new LayoutParams(artSize, artSize);
@@ -70,11 +84,11 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         LayoutParams textLp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         addView(trackText, textLp);
 
-        btnPrev      = makeButton(context, android.R.drawable.ic_media_previous);
-        btnPlayPause = makeButton(context, android.R.drawable.ic_media_pause);
-        btnNext      = makeButton(context, android.R.drawable.ic_media_next);
-        btnVolDown   = makeButton(context, android.R.drawable.ic_lock_silent_mode);
-        btnVolUp     = makeButton(context, android.R.drawable.ic_lock_silent_mode_off);
+        btnPrev      = makeButton(context, GLYPH_PREV);
+        btnPlayPause = makeButton(context, GLYPH_PAUSE);
+        btnNext      = makeButton(context, GLYPH_NEXT);
+        btnVolDown   = makeButton(context, GLYPH_VOL_DOWN);
+        btnVolUp     = makeButton(context, GLYPH_VOL_UP);
 
         addView(btnPrev);
         addView(btnPlayPause);
@@ -85,16 +99,30 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         addView(btnVolUp);
     }
 
-    private ImageButton makeButton(Context context, int iconRes) {
-        ImageButton b = new ImageButton(context);
-        b.setImageResource(iconRes);
-        b.setBackgroundColor(Color.TRANSPARENT);
-        b.setColorFilter(Color.WHITE);
+    /// Builds a flat text-glyph button. We dodge ImageButton with system ic_media_* drawables
+    /// because those have shadow/emboss baked into the bitmaps -- white-tinted, they read as
+    /// glowy against the green background. Pure TextView with a Unicode glyph stays flat.
+    /// Touch feedback comes from the borderless selectableItemBackground ripple, which the
+    /// system theme provides for free on API 21+.
+    private TextView makeButton(Context context, String glyph) {
+        TextView b = new TextView(context);
+        b.setText(glyph);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        b.setGravity(Gravity.CENTER);
+        b.setIncludeFontPadding(false);
+        // Borderless ripple, theme-resolved.
+        android.util.TypedValue tv = new android.util.TypedValue();
+        context.getTheme().resolveAttribute(
+                android.R.attr.selectableItemBackgroundBorderless, tv, true);
+        if (tv.resourceId != 0) b.setBackgroundResource(tv.resourceId);
+        b.setClickable(true);
+        b.setFocusable(true);
         b.setOnClickListener(this);
         int size = dp(48);
         LayoutParams lp = new LayoutParams(size, size);
-        lp.setMarginStart(dp(4));
-        lp.setMarginEnd(dp(4));
+        lp.setMarginStart(dp(2));
+        lp.setMarginEnd(dp(2));
         b.setLayoutParams(lp);
         return b;
     }
@@ -121,11 +149,9 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         trackText.setText(sb.toString());
     }
 
-    /// Flips the play/pause button between the play and pause icons.
+    /// Flips the play/pause button between the play and pause glyphs.
     public void setPaused(boolean paused) {
-        btnPlayPause.setImageResource(paused
-                ? android.R.drawable.ic_media_play
-                : android.R.drawable.ic_media_pause);
+        btnPlayPause.setText(paused ? GLYPH_PLAY : GLYPH_PAUSE);
     }
 
     /// Updates the cover art. If the URL hasn't changed, no-op. If it has, kicks off a
