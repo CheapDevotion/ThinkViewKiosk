@@ -24,11 +24,21 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
     private static final String CHANNEL_ID = "kiosk-alarm";
     private static final int NOTIFICATION_ID = 9002;
 
+    private static volatile AlarmListenerService instance;
     private HaWebSocketClient client;
+
+    /// Live reference to the running service (or null) so KioskCommandHandler can hot-update
+    /// the device name on the existing websocket without bouncing the connection.
+    static AlarmListenerService getInstance() { return instance; }
+
+    void updateDeviceName(String newName) {
+        if (client != null) client.setDeviceName(newName);
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         startForeground(NOTIFICATION_ID, buildNotification("Listening for alarm…"));
 
         SharedPreferences prefs = getSharedPreferences("kiosk-prefs", MODE_PRIVATE);
@@ -49,7 +59,7 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
             return;
         }
         Log.i(TAG, "starting alarm listener for " + alarmEntity + " on " + haUrl + " (device='" + deviceName + "')");
-        client = new HaWebSocketClient(haUrl, token, alarmEntity, deviceName, this);
+        client = new HaWebSocketClient(this, haUrl, token, alarmEntity, deviceName, this);
         client.connect();
     }
 
@@ -60,6 +70,7 @@ public class AlarmListenerService extends Service implements HaWebSocketClient.L
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         if (client != null) client.shutdown();
         super.onDestroy();
     }

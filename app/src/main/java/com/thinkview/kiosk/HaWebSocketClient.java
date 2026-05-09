@@ -1,5 +1,6 @@
 package com.thinkview.kiosk;
 
+import android.content.Context;
 import android.util.Log;
 
 import com.google.gson.JsonArray;
@@ -41,7 +42,7 @@ class HaWebSocketClient {
     private final String wsUrl;
     private final String accessToken;
     private final String alarmEntity;
-    private final String deviceName;
+    private volatile String deviceName;
     private final Listener listener;
 
     private volatile WebSocket socket;
@@ -52,16 +53,28 @@ class HaWebSocketClient {
     // the firing once HA reports the alarm is no longer in 'triggered' state.
     private boolean alreadyFiredCurrentTrigger = false;
 
-    HaWebSocketClient(String haUrl, String accessToken, String alarmEntity, String deviceName, Listener listener) {
+    HaWebSocketClient(Context context, String haUrl, String accessToken, String alarmEntity, String deviceName, Listener listener) {
         this.wsUrl = toWebSocketUrl(haUrl);
         this.accessToken = accessToken;
         this.alarmEntity = alarmEntity;
         this.deviceName = deviceName == null ? "" : deviceName;
         this.listener = listener;
+        // Custom Dns: routes *.local through MdnsResolver since Android 8.1's stock resolver
+        // has no mDNS support. Without this, the WebSocket loops forever on
+        // "Unable to resolve host 'homeassistant.local'".
         this.http = new OkHttpClient.Builder()
                 .pingInterval(30, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS) // long-poll WebSocket
+                .dns(new MdnsDns(context))
                 .build();
+    }
+
+    /// Update the device name used for filtering kiosk_command events. Called when the user
+    /// renames the device via a remote set_display_name command -- AlarmListenerService stays
+    /// connected, no need to tear down the websocket.
+    void setDeviceName(String newName) {
+        this.deviceName = newName == null ? "" : newName;
+        Log.i(TAG, "device name updated to '" + this.deviceName + "'");
     }
 
     private static String toWebSocketUrl(String haUrl) {

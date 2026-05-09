@@ -12,13 +12,16 @@ import android.util.Log;
  * `adb shell am start --es ... -n com.thinkview.kiosk/.MainActivity`.
  *
  * Supported commands:
- *   disable_siren   -> alarm-siren-enabled = false; stop AlarmListenerService
- *   enable_siren    -> alarm-siren-enabled = true;  start AlarmListenerService (no-op if up)
- *   set_url         -> dashboard-url = <value>; start MainActivity with VIEW intent so the
- *                      WebView navigates immediately
- *   reload          -> tell MainActivity to reload current URL
- *   restart         -> kill MainActivity (Android relaunches via HOME) -- useful after pushed
- *                      config changes that need a clean boot
+ *   disable_siren     -> alarm-siren-enabled = false; stop AlarmListenerService
+ *   enable_siren      -> alarm-siren-enabled = true;  start AlarmListenerService (no-op if up)
+ *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
+ *                        WebView navigates immediately
+ *   set_display_name  -> display-name = <value>; bounce SpotifyConnectService so Zeroconf
+ *                        re-advertises with the new name; hot-update AlarmListenerService's
+ *                        kiosk_command target filter without bouncing the websocket
+ *   reload            -> tell MainActivity to reload current URL
+ *   restart           -> kill MainActivity (Android relaunches via HOME) -- useful after pushed
+ *                        config changes that need a clean boot
  */
 class KioskCommandHandler {
     private static final String TAG = "ThinkViewKiosk/Cmd";
@@ -54,6 +57,27 @@ class KioskCommandHandler {
                 setUrl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                 setUrl.putExtra("url", value);
                 app.startActivity(setUrl);
+                break;
+            case "set_display_name":
+                if (value == null || value.isEmpty()) {
+                    Log.w(TAG, "set_display_name with empty value; ignoring");
+                    return;
+                }
+                prefs.edit().putString("display-name", value).apply();
+                Log.i(TAG, "display-name = " + value);
+                // Bounce Spotify Connect so ZeroconfServer re-advertises under the new name.
+                // Zeroconf's device name is set at construction time -- there's no "rename"
+                // hook, so we tear down and rebuild.
+                app.stopService(new Intent(app, SpotifyConnectService.class));
+                try {
+                    app.startForegroundService(new Intent(app, SpotifyConnectService.class));
+                } catch (Exception ex) {
+                    Log.w(TAG, "couldn't restart SpotifyConnectService: " + ex.getMessage());
+                }
+                // Hot-update the alarm listener's filter so the next kiosk_command targeting
+                // the new name reaches us. No websocket bounce -- saves an HA reconnect storm.
+                AlarmListenerService alarm = AlarmListenerService.getInstance();
+                if (alarm != null) alarm.updateDeviceName(value);
                 break;
             case "reload":
                 Intent reload = new Intent(app, MainActivity.class);
