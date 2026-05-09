@@ -21,8 +21,8 @@ android {
         applicationId "com.thinkview.kiosk"
         minSdk 26
         targetSdk 27
-        versionCode 13
-        versionName "2.2"
+        versionCode 14
+        versionName "2.3"
 
         buildConfigField "String", "HA_TOKEN", "\"" + haToken + "\""
         buildConfigField "String", "HA_ALARM_ENTITY", "\"" + haAlarmEntity + "\""
@@ -71,6 +71,10 @@ android {
             useLegacyPackaging = true
         }
         resources {
+            // librespot's own thin jars ship a log4j2.xml config inside the jar itself
+            // (separately from the log4j artifacts which we exclude above), and both lib +
+            // player ship one. They're harmless once log4j-core isn't on the classpath, but
+            // the duplicate-resource check still needs to be told to pick one.
             pickFirsts += [
                 "log4j2.xml",
             ]
@@ -150,8 +154,27 @@ dependencies {
     // a fat 'jar-with-dependencies' as the main artifact -- we want the 'thin' classifier
     // (librespot's own classes only, transitive deps via Gradle resolution as normal modular
     // jars). Requires `Scripts\build-librespot-deps.ps1` to have populated mavenLocal first.
-    implementation "xyz.gianlu.librespot:librespot-lib:1.6.3"
-    implementation("xyz.gianlu.librespot:librespot-player:1.6.3") {
-        artifact { classifier = "thin" }
+    //
+    // Pinned to 1.6.6-SNAPSHOT (the dev branch) rather than the 1.6.5 release because Spotify
+    // deprecated Mercury-issued scoped tokens in 2025. Sessions still authenticate (the Connect
+    // handshake works, kiosks show up in the picker) but storage-resolve and metadata API
+    // calls return tracks with empty file lists, so Player throws FeederException on every
+    // playback attempt. Commit 90978c1 (Aug 2025) fixes this by switching to Login5-issued
+    // tokens; all 1.6.x releases predate that fix. There is no 1.6.6 tagged release yet.
+    //
+    // Excluding log4j: librespot 1.6.4+ bumped log4j to 2.24.x, which calls
+    // java.lang.management.ManagementFactory at init time. That class doesn't exist on Android
+    // (it's a JVM server-side API), so the very first LoggerFactory.getLogger() call crashes
+    // ZeroconfServer's static initializer. We don't use log4j directly -- librespot's own
+    // code uses the slf4j API -- so we drop log4j and substitute slf4j-simple, which is
+    // pure-Java, prints to System.err (forwarded to logcat as W System.err: ... entries),
+    // and has no platform-specific dependencies.
+    implementation("xyz.gianlu.librespot:librespot-lib:1.6.6-SNAPSHOT") {
+        exclude group: "org.apache.logging.log4j"
     }
+    implementation("xyz.gianlu.librespot:librespot-player:1.6.6-SNAPSHOT") {
+        artifact { classifier = "thin" }
+        exclude group: "org.apache.logging.log4j"
+    }
+    implementation "org.slf4j:slf4j-simple:2.0.16"
 }
