@@ -52,9 +52,21 @@ public class MainActivity extends Activity {
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+
+        // Force max window brightness regardless of system's adaptive-brightness setting.
+        // Without this the kiosk inherits whatever Android decided was "dim enough", which on
+        // wall-mounted devices is too low to read across the room.
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = 1.0f;
+        getWindow().setAttributes(lp);
+
         applyImmersive();
 
         absorbRepoExtras(getIntent());
+        // (Re)schedule the recurring update alarm. Idempotent (same PendingIntent replaces the
+        // existing one), so safe to call on every cold start. Belt + braces vs. relying solely
+        // on BootReceiver, which doesn't fire on adb-install dev iterations.
+        BootReceiver.scheduleUpdateAlarm(this);
         triggerUpdateCheck();
 
         String url = resolveUrl(getIntent());

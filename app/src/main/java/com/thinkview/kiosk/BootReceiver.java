@@ -13,9 +13,14 @@ import android.os.SystemClock;
  * reliable on Android 8.1 (the launcher dispatch can race with package state) -- explicitly
  * starting MainActivity from BOOT_COMPLETED makes the foreground state deterministic.
  *
- * Also schedules the periodic UpdateAlarmReceiver every 12 hours.
+ * Also schedules the periodic UpdateAlarmReceiver. Interval is set short (DEV) while we're
+ * iterating; bump it back up once the kiosk is stable.
  */
 public class BootReceiver extends BroadcastReceiver {
+
+    // DEV: 5 minutes for fast iteration. Production should be 12h or so.
+    static final long UPDATE_INTERVAL_MS = 5L * 60L * 1000L;
+
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : null;
@@ -37,11 +42,12 @@ public class BootReceiver extends BroadcastReceiver {
         Intent intent = new Intent(context, UpdateAlarmReceiver.class);
         PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        long interval = 12L * 60L * 60L * 1000L; // 12h
-        am.setInexactRepeating(
+        // setRepeating is reliable on API 27 (no idle deferral, no inexact bucketing) and
+        // honors short intervals like 5 minutes. Newer Android tightens this; our target is 27.
+        am.setRepeating(
                 AlarmManager.ELAPSED_REALTIME,
-                SystemClock.elapsedRealtime() + interval,
-                interval,
+                SystemClock.elapsedRealtime() + UPDATE_INTERVAL_MS,
+                UPDATE_INTERVAL_MS,
                 pi);
     }
 }
