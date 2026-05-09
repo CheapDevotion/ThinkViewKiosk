@@ -31,24 +31,13 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
     /// service's identity. Material flatness: no gradient, no transparency.
     private static final int SPOTIFY_GREEN = Color.parseColor("#1DB954");
 
-    // Unicode media glyphs render as flat monochrome shapes from Android's system font, so
-    // we don't need PNG/vector drawable assets for the controls. Compared to the system
-    // android.R.drawable.ic_media_* set, these have no built-in shadow/emboss -- which was
-    // the "glowy" effect that looked out of place against the green background.
-    private static final String GLYPH_PREV  = "⏮"; // ⏮ skip-back
-    private static final String GLYPH_PLAY  = "▶"; // ▶ play
-    private static final String GLYPH_PAUSE = "⏸"; // ⏸ pause
-    private static final String GLYPH_NEXT  = "⏭"; // ⏭ skip-forward
-    private static final String GLYPH_VOL_DOWN = "−"; // − minus
-    private static final String GLYPH_VOL_UP   = "+";
-
     private final ImageView artworkImage;
     private final TextView trackText;
-    private final TextView btnPrev;
-    private final TextView btnPlayPause;
-    private final TextView btnNext;
-    private final TextView btnVolDown;
-    private final TextView btnVolUp;
+    private final ImageView btnPrev;
+    private final ImageView btnPlayPause;
+    private final ImageView btnNext;
+    private final ImageView btnVolDown;
+    private final ImageView btnVolUp;
 
     /// URL the artwork ImageView is currently displaying (or fetching). Used by
     /// SpotifyArtworkApply to decide whether a just-completed fetch should still be applied
@@ -86,11 +75,11 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         LayoutParams textLp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         addView(trackText, textLp);
 
-        btnPrev      = makeButton(context, GLYPH_PREV);
-        btnPlayPause = makeButton(context, GLYPH_PAUSE);
-        btnNext      = makeButton(context, GLYPH_NEXT);
-        btnVolDown   = makeButton(context, GLYPH_VOL_DOWN);
-        btnVolUp     = makeButton(context, GLYPH_VOL_UP);
+        btnPrev      = makeButton(context, MediaIconDrawable.Shape.PREV);
+        btnPlayPause = makeButton(context, MediaIconDrawable.Shape.PAUSE);
+        btnNext      = makeButton(context, MediaIconDrawable.Shape.NEXT);
+        btnVolDown   = makeButton(context, MediaIconDrawable.Shape.MINUS);
+        btnVolUp     = makeButton(context, MediaIconDrawable.Shape.PLUS);
 
         addView(btnPrev);
         addView(btnPlayPause);
@@ -101,23 +90,23 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         addView(btnVolUp);
     }
 
-    /// Builds a flat text-glyph button. We dodge ImageButton with system ic_media_* drawables
-    /// because those have shadow/emboss baked into the bitmaps -- white-tinted, they read as
-    /// glowy against the green background. Pure TextView with a Unicode glyph stays flat.
+    /// Builds a flat icon button. v17-v25 used Unicode media glyphs in TextViews, but on this
+    /// device's Lenovo skin Android 8.1's font fallback chain rendered the U+23F8 (pause),
+    /// U+23EE (skip-back), and U+23ED (skip-forward) codepoints as orange/yellow color emoji
+    /// from NotoColorEmoji rather than monochrome glyphs from Roboto. The U+FE0E text-
+    /// presentation variation selector wasn't honored consistently. Solution: draw the
+    /// icons ourselves via MediaIconDrawable -- programmatic shapes, guaranteed flat white,
+    /// no font dependence.
     ///
     /// Press feedback: we hand-build a StateListDrawable rather than using the theme's
     /// selectableItemBackgroundBorderless. The kiosk activity uses Theme.NoTitleBar.Fullscreen
     /// (pre-Material) and on this device's Lenovo skin that attribute resolves to an
-    /// orange-tinted Holo focus ring, which (a) clashes with the Spotify Green and
-    /// (b) sticks on whichever button was last tapped because Holo focus is sticky in touch
-    /// mode. Manual StateListDrawable + explicit focus disabling sidesteps both problems.
-    private TextView makeButton(Context context, String glyph) {
-        TextView b = new TextView(context);
-        b.setText(glyph);
-        b.setTextColor(Color.WHITE);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        b.setGravity(Gravity.CENTER);
-        b.setIncludeFontPadding(false);
+    /// orange-tinted Holo focus ring, which sticks on whichever button was last tapped.
+    /// Manual StateListDrawable + explicit focus disabling sidesteps both problems.
+    private ImageView makeButton(Context context, MediaIconDrawable.Shape shape) {
+        ImageView b = new ImageView(context);
+        b.setImageDrawable(new MediaIconDrawable(shape));
+        b.setScaleType(ImageView.ScaleType.FIT_CENTER);
 
         // 25% white overlay only while finger is down -- gives a subtle Material-style press
         // confirmation that goes away the instant you lift, no orange Holo focus ring.
@@ -129,8 +118,7 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
 
         b.setClickable(true);
         // Explicitly NOT focusable. This is a touch-only kiosk, so D-pad focus is moot, and
-        // Holo's focused state (which is what was painting the persistent orange background
-        // on the pause button) doesn't apply if the button can't receive focus.
+        // Holo's focused state doesn't apply if the button can't receive focus.
         b.setFocusable(false);
         b.setFocusableInTouchMode(false);
 
@@ -165,9 +153,10 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         trackText.setText(sb.toString());
     }
 
-    /// Flips the play/pause button between the play and pause glyphs.
+    /// Flips the play/pause button between the play and pause icons.
     public void setPaused(boolean paused) {
-        btnPlayPause.setText(paused ? GLYPH_PLAY : GLYPH_PAUSE);
+        btnPlayPause.setImageDrawable(new MediaIconDrawable(
+                paused ? MediaIconDrawable.Shape.PLAY : MediaIconDrawable.Shape.PAUSE));
     }
 
     /// Updates the cover art. If the URL hasn't changed, no-op. If it has, kicks off a
