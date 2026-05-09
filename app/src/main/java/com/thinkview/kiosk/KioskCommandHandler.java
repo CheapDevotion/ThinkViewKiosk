@@ -25,6 +25,9 @@ import android.util.Log;
  *                        the name. Forcing function for "phone Spotify lost track of me"
  *   ping              -> log a line. Lets you confirm a device is alive and reachable on the
  *                        HA event bus before issuing real commands.
+ *   get_logs          -> capture recent logcat and POST to HA's persistent_notification
+ *                        service so a maintainer can read remote diagnostics via
+ *                        GET /api/states/persistent_notification.kiosk_logs_<device-slug>
  *   reload            -> tell MainActivity to reload current URL
  *   restart           -> kill MainActivity (Android relaunches via HOME) -- useful after pushed
  *                        config changes that need a clean boot
@@ -108,6 +111,18 @@ class KioskCommandHandler {
                 // is working. Useful when half the fleet is silent and you need to know which
                 // ones are bricked vs which ones are just not in your Spotify cache.
                 Log.i(TAG, "ping received (value='" + value + "')");
+                break;
+            case "get_logs":
+                // Fleet diagnostic. Captures recent logcat and uploads it to HA as a
+                // persistent notification, where a remote maintainer can read it via
+                // GET /api/states/persistent_notification.kiosk_logs_<slug>. Off the websocket
+                // dispatch thread because logcat capture + HTTPS upload can take a couple
+                // seconds, and we don't want to block other kiosk_command events behind it.
+                Log.i(TAG, "get_logs requested -- capturing logcat");
+                String dn = prefs.getString("display-name", "ThinkView Kiosk");
+                Thread t = new Thread(new LogCaptureTask(app, dn), "kiosk-log-capture");
+                t.setDaemon(true);
+                t.start();
                 break;
             case "reload":
                 Intent reload = new Intent(app, MainActivity.class);
