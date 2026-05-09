@@ -40,10 +40,13 @@ public class MainActivity extends Activity {
     private static final String TAG = "ThinkViewKiosk";
     private static final String PREFS = "kiosk-prefs";
     private static final String KEY_URL = "dashboard-url";
-    private static final String KEY_REPO_OWNER   = "repo-owner";
-    private static final String KEY_REPO_NAME    = "repo-name";
-    private static final String KEY_ORIENTATION  = "orientation";
-    private static final String KEY_DISPLAY_NAME = "display-name";
+    private static final String KEY_REPO_OWNER          = "repo-owner";
+    private static final String KEY_REPO_NAME           = "repo-name";
+    private static final String KEY_ORIENTATION         = "orientation";
+    private static final String KEY_DISPLAY_NAME        = "display-name";
+    private static final String KEY_HA_TOKEN            = "ha-token";
+    private static final String KEY_ALARM_ENTITY        = "alarm-entity";
+    private static final String KEY_ALARM_SIREN_ENABLED = "alarm-siren-enabled";
 
     private static GeckoRuntime sRuntime;
 
@@ -84,6 +87,18 @@ public class MainActivity extends Activity {
             startForegroundService(new Intent(this, SpotifyConnectService.class));
         } catch (Exception ex) {
             Log.w(TAG, "couldn't start Spotify Connect service: " + ex.getMessage());
+        }
+
+        // Alarm siren listener: only starts on devices that opted in. Kid-room devices keep
+        // KEY_ALARM_SIREN_ENABLED = false and never connect to HA's WebSocket -- no overlay,
+        // no sound, nothing. They don't even know an alarm fired.
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(KEY_ALARM_SIREN_ENABLED, false)) {
+            try {
+                startForegroundService(new Intent(this, AlarmListenerService.class));
+            } catch (Exception ex) {
+                Log.w(TAG, "couldn't start alarm listener service: " + ex.getMessage());
+            }
         }
 
         String url = resolveUrl(getIntent());
@@ -200,17 +215,21 @@ public class MainActivity extends Activity {
         String repo        = intent.getStringExtra("repo_name");
         String orientation = intent.getStringExtra("orientation");
         String displayName = intent.getStringExtra("display_name");
-        if ((owner != null && !owner.isEmpty())
-                || (repo != null && !repo.isEmpty())
-                || (orientation != null && !orientation.isEmpty())
-                || (displayName != null && !displayName.isEmpty())) {
-            SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-            if (owner != null && !owner.isEmpty())             ed.putString(KEY_REPO_OWNER,   owner);
-            if (repo != null && !repo.isEmpty())               ed.putString(KEY_REPO_NAME,    repo);
-            if (orientation != null && !orientation.isEmpty()) ed.putString(KEY_ORIENTATION,  orientation);
-            if (displayName != null && !displayName.isEmpty()) ed.putString(KEY_DISPLAY_NAME, displayName);
-            ed.apply();
-        }
+        String haToken     = intent.getStringExtra("ha_token");
+        String alarmEntity = intent.getStringExtra("alarm_entity");
+        boolean hasSirenFlag = intent.hasExtra("alarm_siren_enabled");
+        boolean sirenEnabled = intent.getBooleanExtra("alarm_siren_enabled", false);
+
+        SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+        boolean dirty = false;
+        if (owner != null && !owner.isEmpty())             { ed.putString(KEY_REPO_OWNER,   owner);       dirty = true; }
+        if (repo != null && !repo.isEmpty())               { ed.putString(KEY_REPO_NAME,    repo);        dirty = true; }
+        if (orientation != null && !orientation.isEmpty()) { ed.putString(KEY_ORIENTATION,  orientation); dirty = true; }
+        if (displayName != null && !displayName.isEmpty()) { ed.putString(KEY_DISPLAY_NAME, displayName); dirty = true; }
+        if (haToken != null && !haToken.isEmpty())         { ed.putString(KEY_HA_TOKEN,     haToken);     dirty = true; }
+        if (alarmEntity != null && !alarmEntity.isEmpty()) { ed.putString(KEY_ALARM_ENTITY, alarmEntity); dirty = true; }
+        if (hasSirenFlag)                                  { ed.putBoolean(KEY_ALARM_SIREN_ENABLED, sirenEnabled); dirty = true; }
+        if (dirty) ed.apply();
     }
 
     private void applyOrientation() {
