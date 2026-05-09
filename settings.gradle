@@ -13,6 +13,9 @@ dependencyResolutionManagement {
         // GeckoView is published to Mozilla's Maven; the per-ABI 'geckoview-arm' artifact is
         // the last version (95.x) that supports armeabi-v7a, which is what the CD-18781Y is.
         maven { url = uri("https://maven.mozilla.org/maven2/") }
+        // librespot-java post-1.4.0 is published only via JitPack (built on-demand from
+        // GitHub tags at github.com/devgianlu/librespot-java).
+        maven { url = uri("https://jitpack.io") }
     }
 }
 rootProject.name = "ThinkViewKiosk"

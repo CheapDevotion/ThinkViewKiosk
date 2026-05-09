@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -36,9 +40,10 @@ public class MainActivity extends Activity {
     private static final String TAG = "ThinkViewKiosk";
     private static final String PREFS = "kiosk-prefs";
     private static final String KEY_URL = "dashboard-url";
-    private static final String KEY_REPO_OWNER  = "repo-owner";
-    private static final String KEY_REPO_NAME   = "repo-name";
-    private static final String KEY_ORIENTATION = "orientation";
+    private static final String KEY_REPO_OWNER   = "repo-owner";
+    private static final String KEY_REPO_NAME    = "repo-name";
+    private static final String KEY_ORIENTATION  = "orientation";
+    private static final String KEY_DISPLAY_NAME = "display-name";
 
     private static GeckoRuntime sRuntime;
 
@@ -112,12 +117,46 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
-        loadResolved(url);
+        loadWhenOnline(url);
+    }
+
+    /// Cold boots from BootReceiver race system Wi-Fi association: the kiosk app is up before
+    /// the device has an IP, so the first URL load fails with ERR_INTERNET_DISCONNECTED and the
+    /// user has to manually relaunch. Instead, register a NetworkCallback and only fire the
+    /// load once a network with INTERNET capability is available.
+    private void loadWhenOnline(String url) {
+        if (isOnline()) {
+            Log.i(TAG, "network available; loading immediately");
+            loadResolved(url);
+            return;
+        }
+        Log.i(TAG, "no network; deferring load");
+        showOverlay("Waiting for Wi-Fi...");
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null) {
+            // No connectivity manager somehow -- best-effort load anyway.
+            loadResolved(url);
+            return;
+        }
+        NetworkRequest req = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build();
+        cm.registerNetworkCallback(req, new NetworkAwaitCallback(this, cm, url));
+    }
+
+    private boolean isOnline() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+        Network active = cm.getActiveNetwork();
+        if (active == null) return false;
+        NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
     }
 
     /// Loads the URL into GeckoView, doing an mDNS lookup first if the host ends in .local.
     /// Android 8.1 has no native .local resolver, so we substitute the resolved IP.
-    private void loadResolved(final String url) {
+    /// Package-private so NetworkAvailableLoadAction can call back into it.
+    void loadResolved(final String url) {
         final Uri parsed = Uri.parse(url);
         final String host = parsed.getHost();
         if (host == null || !host.toLowerCase().endsWith(".local")) {
@@ -139,7 +178,7 @@ public class MainActivity extends Activity {
         String url = resolveUrl(intent);
         Log.i(TAG, "onNewIntent; resolved url = " + url);
         if (url != null && !url.isEmpty() && session != null) {
-            loadResolved(url);
+            loadWhenOnline(url);
         }
     }
 
@@ -154,13 +193,16 @@ public class MainActivity extends Activity {
         String owner       = intent.getStringExtra("repo_owner");
         String repo        = intent.getStringExtra("repo_name");
         String orientation = intent.getStringExtra("orientation");
+        String displayName = intent.getStringExtra("display_name");
         if ((owner != null && !owner.isEmpty())
                 || (repo != null && !repo.isEmpty())
-                || (orientation != null && !orientation.isEmpty())) {
+                || (orientation != null && !orientation.isEmpty())
+                || (displayName != null && !displayName.isEmpty())) {
             SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-            if (owner != null && !owner.isEmpty())             ed.putString(KEY_REPO_OWNER,  owner);
-            if (repo != null && !repo.isEmpty())               ed.putString(KEY_REPO_NAME,   repo);
-            if (orientation != null && !orientation.isEmpty()) ed.putString(KEY_ORIENTATION, orientation);
+            if (owner != null && !owner.isEmpty())             ed.putString(KEY_REPO_OWNER,   owner);
+            if (repo != null && !repo.isEmpty())               ed.putString(KEY_REPO_NAME,    repo);
+            if (orientation != null && !orientation.isEmpty()) ed.putString(KEY_ORIENTATION,  orientation);
+            if (displayName != null && !displayName.isEmpty()) ed.putString(KEY_DISPLAY_NAME, displayName);
             ed.apply();
         }
     }
