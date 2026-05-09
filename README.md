@@ -1,22 +1,23 @@
 # ThinkView Kiosk
 
-Minimal Android WebView app that displays a single configured URL in fullscreen, immersive
-mode. Built specifically because the off-the-shelf options (Fully Kiosk free, WallPanel) all
-have programmatic-config gaps that make them awkward to drive from a one-button-flash workflow.
+Minimal Android kiosk app for the Lenovo ThinkSmart View (CD-18781Y). Loads a single configured
+URL in a fullscreen Mozilla GeckoView, with mDNS resolution for `.local` hostnames, silent
+self-update from GitHub Releases, and device-owner privileges so installs don't prompt.
 
 ## What it does
 
-- Single fullscreen `WebView` with JavaScript + DOM storage enabled.
-- URL comes from `Intent.getStringExtra("url")` first, then `Intent.getData()` (so `VIEW`
-  intents work), falling back to its own `SharedPreferences`.
-- Whatever URL it finds gets persisted, so subsequent cold starts (boot autostart, foreground
-  re-entry) reuse it.
-- Declares `android.intent.category.HOME`, so `cmd package set-home-activity` works.
-- `BootReceiver` listens for `BOOT_COMPLETED` and explicitly starts `MainActivity` — belt +
-  braces alongside the HOME launcher dispatch.
-- Intercepts BACK so a stray gesture can't drop the user out of the kiosk; in-page back-nav
-  still works.
-- `usesCleartextTraffic="true"` — Home Assistant on a local network is the whole point.
+- Single fullscreen `GeckoView` (Mozilla's embedded Firefox engine — bundled because the
+  CD-18781Y's stock WebView is Chromium 61 from 2017 and can't run modern JavaScript).
+- URL comes from `Intent.getStringExtra("url")`, then `Intent.getData()` (VIEW intents work),
+  falling back to persisted `SharedPreferences`.
+- mDNS resolver for `.local` hostnames — Android 8.1 doesn't have one natively.
+- Declares `android.intent.category.HOME` so `cmd package set-home-activity` works.
+- `BootReceiver` starts `MainActivity` on `BOOT_COMPLETED` and schedules a 12-hour
+  update-check `AlarmManager`.
+- `UpdateChecker` polls GitHub Releases and silently installs newer APKs via `PackageInstaller`
+  (requires device-owner, set during provisioning).
+- Intercepts BACK so a stray gesture can't drop the user out of the kiosk.
+- `usesCleartextTraffic="true"` — local Home Assistant is the whole point.
 
 ## Build
 
@@ -24,8 +25,12 @@ have programmatic-config gaps that make them awkward to drive from a one-button-
 .\Scripts\build-kiosk-apk.ps1
 ```
 
-Bootstraps a project-local JDK + Android SDK on first run. ~600 MB one-time download. Output:
-`ThinkViewInit/Resources/APKs/thinkview-kiosk.apk`, debug-signed.
+Driven by Gradle (the Mozilla GeckoView dep is published only via Maven AAR, so a direct
+javac+d8 toolchain isn't viable). First run downloads Gradle 8.9 + AGP 8.7 + GeckoView (~250 MB
+total) into `~/.gradle`. Subsequent builds are incremental (~10 s).
+
+Output: `ThinkViewInit/Resources/APKs/thinkview-kiosk.apk` (~57 MB), debug-signed against
+`Tools/debug.keystore`.
 
 ## Set the URL after install
 

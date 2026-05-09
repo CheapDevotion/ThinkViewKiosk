@@ -1,0 +1,73 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.thinkview.kiosk"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.thinkview.kiosk"
+        minSdk 26
+        targetSdk 27
+        versionCode 2
+        versionName "1.1"
+
+        // 32-bit ARM only -- this is what the CD-18781Y is. Drops the size of GeckoView's native
+        // libs to ~25MB instead of ~120MB for all ABIs.
+        ndk {
+            abiFilters "armeabi-v7a"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    signingConfigs {
+        debug {
+            // Use a project-local keystore so every dev/CI run produces signed APKs.
+            // The provisioning pipeline accepts debug-signed APKs since the device is also a
+            // debuggable target -- production deployments would swap this for a real key.
+            storeFile file("../../Tools/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
+    buildTypes {
+        release {
+            // Keep the release build debuggable so `adb shell run-as com.thinkview.kiosk ...`
+            // works for diagnostics. Production hardening can come later.
+            debuggable true
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+        debug {
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    packaging {
+        // Mozilla ships several stub .so files; let dups resolve to first occurrence.
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+dependencies {
+    // GeckoView 95.x is the last release that ships armeabi-v7a binaries (Mozilla dropped
+    // 32-bit ARM in 96). Modern enough to run Home Assistant's frontend -- Firefox 95 from
+    // December 2021. The artifact is universal (all ABIs); abiFilters above strips down to
+    // armeabi-v7a at packaging time.
+    implementation "org.mozilla.geckoview:geckoview:95.0.20211218203254"
+
+    implementation "androidx.appcompat:appcompat:1.6.1"
+}
