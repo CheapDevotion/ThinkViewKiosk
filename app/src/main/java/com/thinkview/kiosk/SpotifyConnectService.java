@@ -19,15 +19,18 @@ import android.os.Looper;
 import android.util.Log;
 
 import com.spotify.connectstate.Connect;
+import com.spotify.metadata.Metadata;
 
 import xyz.gianlu.librespot.ZeroconfServer;
 import xyz.gianlu.librespot.audio.MetadataWrapper;
 import xyz.gianlu.librespot.audio.decoders.AudioQuality;
+import xyz.gianlu.librespot.common.Utils;
 import xyz.gianlu.librespot.core.Session;
 import xyz.gianlu.librespot.player.Player;
 import xyz.gianlu.librespot.player.PlayerConfiguration;
 
 import java.io.File;
+import java.util.Locale;
 
 /**
  * Foreground service that runs librespot-java's Zeroconf Spotify Connect receiver.
@@ -65,10 +68,11 @@ public class SpotifyConnectService extends Service {
     // Now-playing footer support: state cached here, observed by MainActivity.
     // The static instance pointer mirrors AlarmListenerService's pattern.
     private static volatile SpotifyConnectService instance;
-    private volatile boolean hasActiveTrack = false;
-    private volatile boolean isPaused       = false;
-    private volatile String currentTitle    = null;
-    private volatile String currentArtist   = null;
+    private volatile boolean hasActiveTrack   = false;
+    private volatile boolean isPaused         = false;
+    private volatile String currentTitle      = null;
+    private volatile String currentArtist     = null;
+    private volatile String currentArtworkUrl = null;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     /// MainActivity registers/unregisters here in onResume/onPause to receive UI updates.
@@ -80,10 +84,11 @@ public class SpotifyConnectService extends Service {
     public static void setObserver(PlaybackObserver o) { observer = o; }
     public static SpotifyConnectService getInstance() { return instance; }
 
-    public boolean hasActiveTrack() { return hasActiveTrack; }
-    public boolean isPaused()       { return isPaused; }
-    public String  currentTitle()   { return currentTitle; }
-    public String  currentArtist()  { return currentArtist; }
+    public boolean hasActiveTrack()    { return hasActiveTrack; }
+    public boolean isPaused()          { return isPaused; }
+    public String  currentTitle()      { return currentTitle; }
+    public String  currentArtist()     { return currentArtist; }
+    public String  currentArtworkUrl() { return currentArtworkUrl; }
 
     @Override
     public void onCreate() {
@@ -183,6 +188,7 @@ public class SpotifyConnectService extends Service {
         hasActiveTrack = false;
         currentTitle = null;
         currentArtist = null;
+        currentArtworkUrl = null;
         notifyObserver();
     }
 
@@ -193,14 +199,45 @@ public class SpotifyConnectService extends Service {
     /// Called from SpotifyPlayerEventsListener on track change / metadata-available events.
     void onSpotifyMetadata(MetadataWrapper md) {
         try {
-            currentTitle  = md.getName();
-            currentArtist = md.getArtist();
+            currentTitle      = md.getName();
+            currentArtist     = md.getArtist();
+            currentArtworkUrl = artworkUrlForMetadata(md);
         } catch (Exception ex) {
             Log.w(TAG, "metadata read failed: " + ex.getMessage());
             return;
         }
         hasActiveTrack = true;
         notifyObserver();
+    }
+
+    /// Builds the Spotify CDN URL for a track's cover art. Picks the LARGE (~300px) variant
+    /// from the ImageGroup; that scales down comfortably to our 48dp footer thumbnail without
+    /// chasing XLARGE bandwidth. Falls back to whatever's first in the group if LARGE isn't
+    /// present, then null if there's no artwork at all.
+    ///
+    /// i.scdn.co serves these images at https://i.scdn.co/image/<hex(file_id)> -- public,
+    /// no auth header needed. Stable URL pattern across the Spotify catalog.
+    private static String artworkUrlForMetadata(MetadataWrapper md) {
+        Metadata.ImageGroup grp;
+        try {
+            grp = md.getCoverImage();
+        } catch (Exception ex) {
+            return null;
+        }
+        if (grp == null || grp.getImageCount() == 0) return null;
+
+        Metadata.Image best = null;
+        for (Metadata.Image img : grp.getImageList()) {
+            if (img.getSize() == Metadata.Image.Size.LARGE) {
+                best = img;
+                break;
+            }
+        }
+        if (best == null) best = grp.getImage(0);
+        if (best == null || !best.hasFileId()) return null;
+
+        String hex = Utils.bytesToHex(best.getFileId().toByteArray()).toLowerCase(Locale.ROOT);
+        return "https://i.scdn.co/image/" + hex;
     }
 
     void onSpotifyPlaybackPaused(boolean paused) {
@@ -212,6 +249,7 @@ public class SpotifyConnectService extends Service {
         hasActiveTrack = false;
         currentTitle = null;
         currentArtist = null;
+        currentArtworkUrl = null;
         notifyObserver();
     }
 

@@ -1,14 +1,20 @@
 package com.thinkview.kiosk;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import java.util.Objects;
 
 /**
  * Now-playing footer for Spotify Connect. A self-contained LinearLayout that owns its child
@@ -20,12 +26,19 @@ import android.widget.TextView;
  * KioskApp's resource set as small as possible.
  */
 public class SpotifyFooterView extends LinearLayout implements View.OnClickListener {
+    private final ImageView artworkImage;
     private final TextView trackText;
     private final ImageButton btnPrev;
     private final ImageButton btnPlayPause;
     private final ImageButton btnNext;
     private final ImageButton btnVolDown;
     private final ImageButton btnVolUp;
+
+    /// URL the artwork ImageView is currently displaying (or fetching). Used by
+    /// SpotifyArtworkApply to decide whether a just-completed fetch should still be applied
+    /// or quietly discarded because the user has already skipped to a different track.
+    private String currentArtworkUrl;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     public SpotifyFooterView(Context context) {
         super(context);
@@ -37,6 +50,16 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         int padH = dp(16);
         int padV = dp(8);
         setPadding(padH, padV, padH, padV);
+
+        // Album art on the left. Dark gray placeholder before any image is fetched so the
+        // footer doesn't reflow when artwork lands later.
+        artworkImage = new ImageView(context);
+        artworkImage.setBackgroundColor(Color.parseColor("#222222"));
+        artworkImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        int artSize = dp(48);
+        LayoutParams artLp = new LayoutParams(artSize, artSize);
+        artLp.setMarginEnd(dp(12));
+        addView(artworkImage, artLp);
 
         trackText = new TextView(context);
         trackText.setTextColor(Color.WHITE);
@@ -103,6 +126,31 @@ public class SpotifyFooterView extends LinearLayout implements View.OnClickListe
         btnPlayPause.setImageResource(paused
                 ? android.R.drawable.ic_media_play
                 : android.R.drawable.ic_media_pause);
+    }
+
+    /// Updates the cover art. If the URL hasn't changed, no-op. If it has, kicks off a
+    /// background fetch; the result lands via applyArtworkIfMatch on the main thread.
+    public void setArtworkUrl(String url) {
+        if (Objects.equals(url, currentArtworkUrl)) return;
+        currentArtworkUrl = url;
+        if (url == null || url.isEmpty()) {
+            artworkImage.setImageDrawable(null);
+            return;
+        }
+        // Show the placeholder while the fetch is in flight so the previous track's art
+        // doesn't sit on screen pretending to be the new one.
+        artworkImage.setImageDrawable(null);
+        Thread t = new Thread(new SpotifyArtworkFetcher(this, url, mainHandler), "spotify-art-fetch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /// Called from SpotifyArtworkApply on the main thread when a fetch completes. Applies the
+    /// bitmap only if the URL we fetched still matches what we're meant to show -- track
+    /// changes that happened while the fetch was in flight win the race.
+    void applyArtworkIfMatch(String forUrl, Bitmap bitmap) {
+        if (!Objects.equals(forUrl, currentArtworkUrl)) return;
+        artworkImage.setImageBitmap(bitmap);
     }
 
     @Override

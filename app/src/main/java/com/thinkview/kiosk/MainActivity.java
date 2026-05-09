@@ -190,6 +190,7 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
             return;
         }
         spotifyFooter.setTrackText(svc.currentTitle(), svc.currentArtist());
+        spotifyFooter.setArtworkUrl(svc.currentArtworkUrl());
         spotifyFooter.setPaused(svc.isPaused());
         spotifyFooter.setVisibility(View.VISIBLE);
     }
