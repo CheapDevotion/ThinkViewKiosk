@@ -355,11 +355,24 @@ public class SpotifyConnectService extends Service {
         Log.i(TAG, "Spotify session started");
         this.session = newSession;
         try {
+            // Autoplay (default false): when a Spotify Connect queue ends -- or, more
+            // surprisingly, when librespot's session reconnects after a network hiccup and
+            // Spotify's server-side state thinks the queue ended -- librespot's loadAutoplay
+            // path queries Spotify's autoplay endpoint and seamlessly switches the playback
+            // context to a radio station based on the current artist. From the user's
+            // perspective this looks like "I was listening to a playlist, came back later,
+            // now it's just this artist's catalog with no input from me." For a foreground
+            // kiosk player that's surprising and unwanted; default is to stop at end-of-
+            // queue. Per-device override available via the set_autoplay kiosk_command.
+            SharedPreferences perdevicePrefs = getSharedPreferences("kiosk-prefs", MODE_PRIVATE);
+            boolean autoplay = perdevicePrefs.getBoolean("spotify-autoplay", false);
+
             PlayerConfiguration playerConf = new PlayerConfiguration.Builder()
                     .setOutput(PlayerConfiguration.AudioOutput.CUSTOM)
                     .setOutputClass(AudioTrackSink.class.getName())
                     .setPreferredQuality(AudioQuality.HIGH)
                     .setEnableNormalisation(true)
+                    .setAutoplayEnabled(autoplay)
                     // Default is 64 steps (~1.5% per tap) which is imperceptibly small for
                     // a single tap on the kiosk's footer +/- buttons. 32 steps = ~3% per
                     // tap, audibly meaningful while still being fine-grained enough that

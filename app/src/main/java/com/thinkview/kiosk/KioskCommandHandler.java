@@ -32,6 +32,12 @@ import android.util.Log;
  *                        live to the running MainActivity's window and persisted to
  *                        SharedPreferences. Useful for "alarm armed -> dim bedroom panel"
  *                        style HA automations.
+ *   set_autoplay      -> spotify-autoplay = (value parsed as bool). Default false. When
+ *                        true, librespot's autoplay loads a radio station based on the
+ *                        current artist when the queue exhausts. When false (recommended
+ *                        for foreground kiosks), playback stops at end of queue. Takes
+ *                        effect on the next Spotify Connect session -- reconnect from
+ *                        phone after toggling.
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -96,6 +102,14 @@ class KioskCommandHandler {
                 String newCode = value == null ? "" : value;
                 prefs.edit().putString("alarm-disarm-code", newCode).apply();
                 Log.i(TAG, "alarm-disarm-code " + (newCode.isEmpty() ? "cleared" : "set"));
+                break;
+            case "set_autoplay":
+                boolean autoplayOn = "true".equalsIgnoreCase(value)
+                        || "1".equals(value)
+                        || "yes".equalsIgnoreCase(value);
+                prefs.edit().putBoolean("spotify-autoplay", autoplayOn).apply();
+                Log.i(TAG, "spotify-autoplay = " + autoplayOn
+                        + " (takes effect on next Connect session)");
                 break;
             case "set_brightness":
                 if (value == null || value.isEmpty()) {
