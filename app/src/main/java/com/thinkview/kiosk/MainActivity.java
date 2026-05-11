@@ -28,9 +28,13 @@ import android.widget.TextView;
 
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoRuntime;
+import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebRequestError;
+
+import java.io.File;
+import java.io.FileWriter;
 
 /**
  * Single-activity kiosk that loads a configured URL in a fullscreen GeckoView.
@@ -126,7 +130,7 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         }
 
         if (sRuntime == null) {
-            sRuntime = GeckoRuntime.create(getApplicationContext());
+            sRuntime = createRuntime();
         }
 
         FrameLayout root = new FrameLayout(this);
@@ -269,6 +273,31 @@ public class MainActivity extends Activity implements SpotifyConnectService.Play
         if (instance == this) instance = null;
         if (session != null) session.close();
         super.onDestroy();
+    }
+
+    /// Builds the singleton GeckoRuntime with a user_prefs file enabling modern-CSS
+    /// flags HA dashboards rely on. GeckoView 95 (Firefox 95 from Dec 2021) ships several
+    /// useful CSS features behind flags that became default in later Firefox releases; we
+    /// flip them on explicitly so dashboards using glassmorphism / blur render correctly.
+    ///
+    /// Currently enabled:
+    ///   - layout.css.backdrop-filter.enabled: the `backdrop-filter: blur(...)` property
+    ///     used by HA glassmorphism cards. Default false in Firefox 95, default true in
+    ///     103+. Without this flag, `backdrop-filter` is silently a no-op.
+    private GeckoRuntime createRuntime() {
+        File prefsFile = new File(getCacheDir(), "gecko-prefs.js");
+        try (FileWriter w = new FileWriter(prefsFile, false)) {
+            w.write("user_pref(\"layout.css.backdrop-filter.enabled\", true);\n");
+        } catch (Exception ex) {
+            Log.w(TAG, "couldn't write gecko prefs.js: " + ex.getMessage());
+            // Fall back to default runtime without our prefs.
+            return GeckoRuntime.create(getApplicationContext());
+        }
+        GeckoRuntimeSettings settings = new GeckoRuntimeSettings.Builder()
+                .configFilePath(prefsFile.getAbsolutePath())
+                .build();
+        Log.i(TAG, "gecko runtime created with prefs file " + prefsFile);
+        return GeckoRuntime.create(getApplicationContext(), settings);
     }
 
     /// Reads screen-brightness pref and applies it to the window. Called from onCreate and
