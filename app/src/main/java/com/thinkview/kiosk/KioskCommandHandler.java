@@ -3,6 +3,7 @@ package com.thinkview.kiosk;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
 import android.util.Log;
 
 /**
@@ -44,6 +45,13 @@ import android.util.Log;
  *                        Replaces any in-progress play_media. Releases automatically on
  *                        completion / error.
  *   stop_media        -> Stops the current play_media playback, if any. No-op otherwise.
+ *   set_volume        -> Sets the device's STREAM_ALARM volume (i.e. the loudness of
+ *                        anything played via play_media). Accepts 0.0-1.0 fraction or
+ *                        0-100 percent. Useful for "boost alarm to 80% just before the
+ *                        7am wakeup, drop to 30% after" automations. Does NOT affect the
+ *                        security siren (which pegs STREAM_ALARM to max regardless) or
+ *                        the Spotify Connect volume (which is controlled separately via
+ *                        the librespot protocol from the phone Spotify slider).
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -128,6 +136,37 @@ class KioskCommandHandler {
             case "stop_media":
                 Log.i(TAG, "stop_media");
                 MediaPlaybackHelper.stop();
+                break;
+            case "set_volume":
+                if (value == null || value.isEmpty()) {
+                    Log.w(TAG, "set_volume with empty value; ignoring");
+                    return;
+                }
+                float vol;
+                try {
+                    vol = Float.parseFloat(value);
+                } catch (NumberFormatException nfe) {
+                    Log.w(TAG, "set_volume with non-numeric value '" + value + "'; ignoring");
+                    return;
+                }
+                // Accept fraction (0.0-1.0) or percentage (0-100). Mirrors set_brightness.
+                if (vol > 1.5f) vol = vol / 100f;
+                if (vol < 0f) vol = 0f;
+                if (vol > 1f) vol = 1f;
+
+                AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+                if (audio == null) {
+                    Log.w(TAG, "set_volume: AudioManager unavailable");
+                    return;
+                }
+                int maxVol = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM);
+                int targetVol = Math.round(vol * maxVol);
+                try {
+                    audio.setStreamVolume(AudioManager.STREAM_ALARM, targetVol, 0);
+                    Log.i(TAG, "set_volume = " + vol + " (STREAM_ALARM " + targetVol + "/" + maxVol + ")");
+                } catch (Exception ex) {
+                    Log.w(TAG, "set_volume failed: " + ex.getMessage());
+                }
                 break;
             case "set_brightness":
                 if (value == null || value.isEmpty()) {
