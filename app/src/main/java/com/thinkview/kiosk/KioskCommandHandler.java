@@ -38,6 +38,12 @@ import android.util.Log;
  *                        for foreground kiosks), playback stops at end of queue. Takes
  *                        effect on the next Spotify Connect session -- reconnect from
  *                        phone after toggling.
+ *   play_media        -> Plays the audio URL in `value` via Android's MediaPlayer on
+ *                        STREAM_ALARM (bypasses silent mode, ducks current music). Use
+ *                        case: HA-driven alarm clocks, doorbell sounds, TTS announcements.
+ *                        Replaces any in-progress play_media. Releases automatically on
+ *                        completion / error.
+ *   stop_media        -> Stops the current play_media playback, if any. No-op otherwise.
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -110,6 +116,18 @@ class KioskCommandHandler {
                 prefs.edit().putBoolean("spotify-autoplay", autoplayOn).apply();
                 Log.i(TAG, "spotify-autoplay = " + autoplayOn
                         + " (takes effect on next Connect session)");
+                break;
+            case "play_media":
+                if (value == null || value.isEmpty()) {
+                    Log.w(TAG, "play_media with empty value; ignoring");
+                    return;
+                }
+                Log.i(TAG, "play_media: " + value);
+                MediaPlaybackHelper.play(app, value);
+                break;
+            case "stop_media":
+                Log.i(TAG, "stop_media");
+                MediaPlaybackHelper.stop();
                 break;
             case "set_brightness":
                 if (value == null || value.isEmpty()) {
