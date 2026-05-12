@@ -3,7 +3,6 @@ package com.thinkview.kiosk;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.media.AudioManager;
 import android.util.Log;
 
 /**
@@ -45,13 +44,17 @@ import android.util.Log;
  *                        Replaces any in-progress play_media. Releases automatically on
  *                        completion / error.
  *   stop_media        -> Stops the current play_media playback, if any. No-op otherwise.
- *   set_volume        -> Sets the device's STREAM_ALARM volume (i.e. the loudness of
- *                        anything played via play_media). Accepts 0.0-1.0 fraction or
- *                        0-100 percent. Useful for "boost alarm to 80% just before the
- *                        7am wakeup, drop to 30% after" automations. Does NOT affect the
- *                        security siren (which pegs STREAM_ALARM to max regardless) or
- *                        the Spotify Connect volume (which is controlled separately via
- *                        the librespot protocol from the phone Spotify slider).
+ *   set_volume        -> Sets the play_media playback volume as a per-sample software
+ *                        gain inside MediaPlayer (0.0-1.0 fraction or 0-100 percent).
+ *                        v33+: stores the value in pref `media-volume` and applies via
+ *                        MediaPlayer.setVolume(), not via STREAM_ALARM index. The Lenovo
+ *                        CD-18781Y's STREAM_ALARM curve is so steep that mid-range index
+ *                        values are effectively inaudible -- software gain gives linear,
+ *                        predictable attenuation across the full 0-100% range. STREAM_ALARM
+ *                        itself stays pegged to hardware max while play_media is active so
+ *                        we have full dynamic range to attenuate from. Does NOT affect the
+ *                        security siren (independent peg/restore in SirenPlayer) or the
+ *                        Spotify Connect volume (separate librespot protocol path).
  *   set_url           -> dashboard-url = <value>; start MainActivity with VIEW intent so the
  *                        WebView navigates immediately
  *   set_display_name  -> display-name = <value>; trigger SpotifyConnectService to rebuild its
@@ -135,7 +138,7 @@ class KioskCommandHandler {
                 break;
             case "stop_media":
                 Log.i(TAG, "stop_media");
-                MediaPlaybackHelper.stop();
+                MediaPlaybackHelper.stop(app);
                 break;
             case "set_volume":
                 if (value == null || value.isEmpty()) {
@@ -154,19 +157,16 @@ class KioskCommandHandler {
                 if (vol < 0f) vol = 0f;
                 if (vol > 1f) vol = 1f;
 
-                AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
-                if (audio == null) {
-                    Log.w(TAG, "set_volume: AudioManager unavailable");
-                    return;
-                }
-                int maxVol = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM);
-                int targetVol = Math.round(vol * maxVol);
-                try {
-                    audio.setStreamVolume(AudioManager.STREAM_ALARM, targetVol, 0);
-                    Log.i(TAG, "set_volume = " + vol + " (STREAM_ALARM " + targetVol + "/" + maxVol + ")");
-                } catch (Exception ex) {
-                    Log.w(TAG, "set_volume failed: " + ex.getMessage());
-                }
+                // v33+: software gain on MediaPlayer, not STREAM_ALARM index. The Lenovo
+                // CD-18781Y's STREAM_ALARM volume curve is so steep that 6/15 (40%) is
+                // effectively inaudible while 15/15 (100%) is full output. Apply volume
+                // as a per-sample software attenuation inside MediaPlayer instead, where
+                // the curve is linear and predictable. play_media keeps STREAM_ALARM
+                // pegged to max during playback so our software gain has the full range
+                // to work with.
+                prefs.edit().putFloat("media-volume", vol).apply();
+                Log.i(TAG, "media-volume = " + vol);
+                MediaPlaybackHelper.applyVolumeToCurrent(vol);
                 break;
             case "set_brightness":
                 if (value == null || value.isEmpty()) {
